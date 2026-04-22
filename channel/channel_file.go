@@ -321,28 +321,29 @@ func (ch *Channel) finalizeRecording(filename string) {
 		if err != nil {
 			ch.Error("gofile upload failed for `%s`: %s", finalPath, err.Error())
 			ch.Info("keeping local file because upload failed")
-			
-			// Database logging disabled for GitHub Actions compatibility
-			// Failed uploads are tracked in workflow database instead
+			// Do not create database folders or log failed uploads
 		} else {
 			ch.Info("upload successful: %s", downloadLink)
 			
-			// Store in GitHub Actions database (JSON files)
+			// Only create database folders and log after successful upload
+			// Store in GitHub Actions database (JSON files) - creates folders only on success
 			if err := ch.logUploadToDatabase(finalPath, downloadLink); err != nil {
-				ch.Error("failed to log upload to database: %s", err.Error())
+				ch.Error("failed to log upload to GitHub Actions database: %s", err.Error())
+			} else {
+				ch.Info("upload logged to GitHub Actions database")
 			}
 			
-			// Store upload record in Supabase if configured
+			// Store upload record in Supabase if configured (dual database system)
 			if server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "" {
 				supabaseClient := supabase.NewClient(server.Config.SupabaseURL, server.Config.SupabaseAPIKey)
 				if err := supabaseClient.InsertUploadRecord(ch.Config.Username, downloadLink); err != nil {
 					ch.Error("failed to store upload record in Supabase: %s", err.Error())
 				} else {
-					ch.Info("upload record stored in Supabase")
+					ch.Info("upload record stored in Supabase database")
 				}
 			}
 			
-			// Delete local file after successful upload
+			// Delete local file only after successful upload and database logging
 			if err := os.Remove(finalPath); err != nil {
 				ch.Error("failed to delete local file `%s`: %s", finalPath, err.Error())
 			} else {
@@ -410,28 +411,29 @@ func (ch *Channel) finalizeRecordingAsync(filename string) {
 		if err != nil {
 			ch.Error("gofile upload failed for `%s`: %s", finalPath, err.Error())
 			ch.Info("keeping local file because upload failed")
-			
-			// Database logging disabled for GitHub Actions compatibility
-			// Failed uploads are tracked in workflow database instead
+			// Do not create database folders or log failed uploads
 		} else {
 			ch.Info("upload successful: %s", downloadLink)
 			
-			// Store in GitHub Actions database (JSON files)
+			// Only create database folders and log after successful upload
+			// Store in GitHub Actions database (JSON files) - creates folders only on success
 			if err := ch.logUploadToDatabase(finalPath, downloadLink); err != nil {
-				ch.Error("failed to log upload to database: %s", err.Error())
+				ch.Error("failed to log upload to GitHub Actions database: %s", err.Error())
+			} else {
+				ch.Info("upload logged to GitHub Actions database")
 			}
 			
-			// Store upload record in Supabase if configured
+			// Store upload record in Supabase if configured (dual database system)
 			if server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "" {
 				supabaseClient := supabase.NewClient(server.Config.SupabaseURL, server.Config.SupabaseAPIKey)
 				if err := supabaseClient.InsertUploadRecord(ch.Config.Username, downloadLink); err != nil {
 					ch.Error("failed to store upload record in Supabase: %s", err.Error())
 				} else {
-					ch.Info("upload record stored in Supabase")
+					ch.Info("upload record stored in Supabase database")
 				}
 			}
 			
-			// Step 3: Delete local file after successful upload
+			// Step 3: Delete local file only after successful upload and database logging
 			ch.Info("deleting local file `%s`...", filepath.Base(finalPath))
 			if err := os.Remove(finalPath); err != nil {
 				ch.Error("failed to delete local file `%s`: %s", finalPath, err.Error())
@@ -602,25 +604,38 @@ func qualityArgsForEncoder(encoder string, quality int) []string {
 }
 
 // logUploadToDatabase stores upload record in local JSON database (GitHub Actions compatible)
+// This function only creates folders and files after a successful GoFile upload
 func (ch *Channel) logUploadToDatabase(filePath, gofileLink string) error {
-	// Create database directory structure: database/<username>/<date>/
+	// Validate inputs before creating any folders
+	if gofileLink == "" {
+		return fmt.Errorf("gofile link is empty, cannot log to database")
+	}
+	
+	// Get file info before creating database structure
+	fileInfo, err := os.Stat(filePath)
+	var fileSize int64
+	if err == nil {
+		fileSize = fileInfo.Size()
+	} else {
+		// File might have been deleted already, try to get size from channel state
+		ch.fileMu.RLock()
+		fileSize = ch.Filesize
+		ch.fileMu.RUnlock()
+	}
+	
+	// Create database directory structure ONLY after validating upload success
+	// Structure: database/<username>/<date>/
 	currentDate := time.Now().UTC().Format("2006-01-02")
 	dbDir := filepath.Join("database", ch.Config.Username, currentDate)
 	
+	// Create directory atomically
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		return fmt.Errorf("create database directory: %w", err)
 	}
 	
 	recordsFile := filepath.Join(dbDir, "recordings.json")
 	
-	// Get file info
-	fileInfo, err := os.Stat(filePath)
-	var fileSize int64
-	if err == nil {
-		fileSize = fileInfo.Size()
-	}
-	
-	// Create new record
+	// Create new record with all metadata
 	record := map[string]interface{}{
 		"id":             fmt.Sprintf("%s_%d_%d", ch.Config.Username, time.Now().Unix(), time.Now().Nanosecond()),
 		"username":       ch.Config.Username,
@@ -630,6 +645,7 @@ func (ch *Channel) logUploadToDatabase(filePath, gofileLink string) error {
 		"uploaded_at":    time.Now().UTC().Format(time.RFC3339),
 		"filesize_bytes": fileSize,
 		"status":         "uploaded",
+		"duration_seconds": ch.Duration,
 	}
 	
 	// Read existing data or create new structure
@@ -638,17 +654,20 @@ func (ch *Channel) logUploadToDatabase(filePath, gofileLink string) error {
 		if err := json.Unmarshal(fileData, &data); err != nil {
 			return fmt.Errorf("parse existing records: %w", err)
 		}
-	} else {
-		// Initialize new database file
+	} else if os.IsNotExist(err) {
+		// Initialize new database file structure
 		data = map[string]interface{}{
 			"date":     currentDate,
 			"username": ch.Config.Username,
+			"site":     ch.Config.Site,
 			"recordings": []interface{}{},
 			"summary": map[string]interface{}{
 				"total_recordings":  0,
 				"total_size_bytes": 0,
 			},
 		}
+	} else {
+		return fmt.Errorf("read records file: %w", err)
 	}
 	
 	// Append new record
@@ -659,13 +678,7 @@ func (ch *Channel) logUploadToDatabase(filePath, gofileLink string) error {
 	recordings = append(recordings, record)
 	data["recordings"] = recordings
 	
-	// Update summary
-	summary := map[string]interface{}{
-		"total_recordings":  len(recordings),
-		"total_size_bytes": 0,
-	}
-	
-	// Calculate total size
+	// Update summary statistics
 	var totalSize int64
 	for _, rec := range recordings {
 		if recMap, ok := rec.(map[string]interface{}); ok {
@@ -676,19 +689,30 @@ func (ch *Channel) logUploadToDatabase(filePath, gofileLink string) error {
 			}
 		}
 	}
-	summary["total_size_bytes"] = totalSize
+	
+	summary := map[string]interface{}{
+		"total_recordings":  len(recordings),
+		"total_size_bytes": totalSize,
+		"last_updated":     time.Now().UTC().Format(time.RFC3339),
+	}
 	data["summary"] = summary
 	
-	// Write back to file
+	// Write atomically using temp file
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal records: %w", err)
 	}
 	
-	if err := os.WriteFile(recordsFile, jsonData, 0644); err != nil {
-		return fmt.Errorf("write records file: %w", err)
+	tempFile := recordsFile + ".tmp"
+	if err := os.WriteFile(tempFile, jsonData, 0644); err != nil {
+		return fmt.Errorf("write temp records file: %w", err)
 	}
 	
-	ch.Info("logged to database: %s", recordsFile)
+	// Atomic rename
+	if err := os.Rename(tempFile, recordsFile); err != nil {
+		os.Remove(tempFile) // Clean up temp file on error
+		return fmt.Errorf("rename records file: %w", err)
+	}
+	
 	return nil
 }
