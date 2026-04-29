@@ -85,8 +85,8 @@ jobs:
           # Restore configuration if backed up
           if [ -d "${{ env.APP_DIR }}/backup/conf" ]; then
             echo "♻️  Restoring configuration..."
-            cp -r ${{ env.APP_DIR }}/backup/conf/* ${{ env.APP_DIR }}/conf/
-            cp -r ${{ env.APP_DIR }}/backup/database/* ${{ env.APP_DIR }}/database/ 2>/dev/null || true
+            cp -r ${{ env.APP_DIR }}/backup/conf ${{ env.APP_DIR }}/
+            cp -r ${{ env.APP_DIR }}/backup/database ${{ env.APP_DIR }}/ 2>/dev/null || true
           fi
           
           # Ensure directories exist
