@@ -44,8 +44,7 @@ jobs:
             --exclude='aws-secrets' \
             --exclude='run_logs.txt' \
             --exclude='*.log' \
-            --warning=no-file-changed \
-            .
+            . || [ $? -eq 1 ]
 
       - name: Upload to EC2
         run: |
