@@ -97,11 +97,12 @@ func GetFreshCookies(ctx context.Context, url string) (string, string, error) {
 	resp.Body.Close()
 	
 	// Now make the actual request with the session
-
+	// CRITICAL: maxTimeout must be in milliseconds and sent in API request
+	// Byparr ignores TIMEOUT env var - this is the only way to extend timeout
 	reqBody := FlareSolverrRequest{
 		Cmd:        "request.get",
 		URL:        url,
-		MaxTimeout: 180000, // 180 seconds for Cloudflare challenges
+		MaxTimeout: 180000, // 180 seconds (180000ms) for Cloudflare 2026 challenges
 		Session:    sessionID,
 	}
 	

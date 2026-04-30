@@ -52,6 +52,8 @@ services:
       start_period: 10s
 
   # GoOnDVR - Stream recorder (FREE TIER c7i-flex.large OPTIMIZED)
+  # NOTE: For best results, use manual cookies from browser instead of Byparr
+  # See docs/CLOUDFLARE_BYPASS_2026.md for 100% success rate method
   recorder:
     build: .
     container_name: goondvr
