@@ -219,15 +219,65 @@ jobs:
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "⚙️  GoFile Upload Status:"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            if [ -f conf/settings.json ]; then
-              if grep -q '"enable_gofile_upload": true' conf/settings.json; then
-                echo "✅ GoFile upload is ENABLED"
-              else
-                echo "⚠️  GoFile upload is DISABLED"
-              fi
-            else
-              echo "⚠️  Settings file not found"
+            
+            # Check and fix settings
+            if [ ! -f conf/settings.json ]; then
+              echo "⚠️  conf/settings.json not found! Creating with defaults..."
+              mkdir -p conf
+              cat > conf/settings.json <<'SETTINGS'
+{
+  "cookies": "",
+  "user_agent": "",
+  "enable_gofile_upload": true,
+  "enable_supabase": true,
+  "turboviplay_api_key": "",
+  "voesx_api_key": "",
+  "streamtape_login": "",
+  "streamtape_api_key": "",
+  "supabase_url": "",
+  "supabase_api_key": "",
+  "discord_webhook_url": "",
+  "finalize_mode": "remux",
+  "ffmpeg_container": "mp4",
+  "ffmpeg_encoder": "libx264",
+  "ffmpeg_quality": 18,
+  "ffmpeg_preset": "slow",
+  "disk_warning_percent": 80,
+  "disk_critical_percent": 90
+}
+SETTINGS
+              echo "✅ Created conf/settings.json"
+              sudo docker restart goondvr
+              sleep 5
             fi
+            
+            # Verify GoFile setting
+            if grep -q '"enable_gofile_upload": true' conf/settings.json; then
+              echo "✅ GoFile upload is ENABLED in conf/settings.json"
+            elif grep -q '"enable_gofile_upload": false' conf/settings.json; then
+              echo "⚠️  GoFile upload is DISABLED - Enabling now..."
+              sed -i 's/"enable_gofile_upload": false/"enable_gofile_upload": true/g' conf/settings.json
+              sudo docker restart goondvr
+              sleep 5
+              echo "✅ GoFile upload enabled and container restarted"
+            elif ! grep -q "enable_gofile_upload" conf/settings.json; then
+              echo "⚠️  enable_gofile_upload field missing - Adding now..."
+              # Add before the last closing brace
+              sed -i 's/}$/,\n  "enable_gofile_upload": true\n}/' conf/settings.json
+              sudo docker restart goondvr
+              sleep 5
+              echo "✅ GoFile upload field added and container restarted"
+            fi
+            
+            echo ""
+            echo "📄 Current settings.json (relevant fields):"
+            grep -E "enable_gofile_upload|enable_supabase|turboviplay|voesx|streamtape" conf/settings.json || echo "No upload settings found"
+            
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📋 Application Logs (last 15 lines):"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            sudo docker logs --tail 15 goondvr
             
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
