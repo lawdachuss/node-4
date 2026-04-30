@@ -73,6 +73,7 @@ services:
       byparr-lb:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 5m  # Allow 5 minutes for graceful shutdown (finalize recordings)
     networks:
       - recorder-network
     deploy:

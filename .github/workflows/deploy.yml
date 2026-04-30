@@ -119,19 +119,37 @@ jobs:
             git pull origin main
             
             echo ""
+            echo "🔍 Checking for active recordings..."
+            ACTIVE_RECORDINGS=$(sudo docker exec goondvr sh -c 'ls -1 /usr/src/app/videos/*.ts /usr/src/app/videos/*.mp4 2>/dev/null | wc -l' || echo "0")
+            
+            if [ "$ACTIVE_RECORDINGS" -gt 0 ] && [ "${{ github.event.inputs.skip_build }}" != "true" ]; then
+              echo "⚠️  WARNING: $ACTIVE_RECORDINGS active recording(s) detected!"
+              echo "📊 Current recordings:"
+              sudo docker exec goondvr sh -c 'ls -lh /usr/src/app/videos/*.ts /usr/src/app/videos/*.mp4 2>/dev/null || echo "None"'
+              echo ""
+              echo "⏳ Waiting 30 seconds before proceeding with graceful shutdown..."
+              echo "   (This allows current segments to finish writing)"
+              sleep 30
+            fi
+            
+            echo ""
             echo "🐳 Managing Docker containers..."
             
             if [ "${{ github.event.inputs.skip_build }}" = "true" ]; then
               echo "⏩ Skipping rebuild, just restarting..."
               sudo docker compose restart
             else
-              echo "🏗️  Rebuilding containers with improved caching..."
+              echo "🏗️  Rebuilding containers with graceful shutdown..."
               
-              # Stop containers but keep volumes
-              sudo docker compose down
+              # Graceful stop with extended timeout (allows recordings to finalize)
+              echo "🛑 Stopping containers gracefully (up to 5 minutes for finalization)..."
+              sudo docker compose stop -t 300  # 5 minute timeout
+              
+              # Remove stopped containers
+              sudo docker compose rm -f
               
               # Build with better error handling and retry
-              echo "Building Docker image (this may take a few minutes)..."
+              echo "🔨 Building Docker image (this may take a few minutes)..."
               sudo DOCKER_BUILDKIT=1 docker compose build --no-cache recorder || {
                 echo "⚠️  First build attempt failed, retrying with fresh cache..."
                 sleep 5
@@ -140,6 +158,7 @@ jobs:
               }
               
               # Start all services
+              echo "🚀 Starting services..."
               sudo docker compose up -d
             fi
             
