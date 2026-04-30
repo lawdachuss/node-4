@@ -9,14 +9,10 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/HeapOfChaos/goondvr/server"
 )
-
-// Global counter for round-robin load balancing across FlareSolverr instances
-var flaresolverrCounter uint64
 
 // getFlareSolverrURL returns the FlareSolverr/Byparr URL
 // Supports both load-balanced (byparr-lb) and direct instances
