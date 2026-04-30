@@ -22,14 +22,14 @@ services:
     networks:
       - recorder-network
     deploy:
-      replicas: 4  # FREE TIER c7i-flex.large: 4 instances (handles ~40 channels)
+      replicas: 2  # FREE TIER: 2 instances for better performance (handles ~20 channels)
       resources:
         limits:
-          cpus: '0.9'
-          memory: 600M
+          cpus: '1.5'
+          memory: 1G
         reservations:
-          cpus: '0.15'
-          memory: 200M
+          cpus: '0.25'
+          memory: 300M
 
   # Nginx load balancer for Byparr instances
   byparr-lb:
