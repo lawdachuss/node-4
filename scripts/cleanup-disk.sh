@@ -23,9 +23,9 @@ echo "🗑️  Removing ALL unused Docker images..."
 sudo docker image prune -af
 echo ""
 
-# 3. Remove unused volumes
-echo "🗑️  Removing unused Docker volumes..."
-sudo docker volume prune -f
+# 3. Remove unused volumes (SKIP - preserves Byparr browser cache)
+echo "🗑️  Skipping volume cleanup (preserves Byparr cache)..."
+echo "   Byparr needs its cache for better Cloudflare bypass"
 echo ""
 
 # 4. Clean old recordings (keep last 7 days)

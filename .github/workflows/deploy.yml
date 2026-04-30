@@ -127,23 +127,15 @@ jobs:
             fi
             
             echo ""
-            echo "🧹 Aggressive cache cleanup..."
+            echo "🧹 Smart cache cleanup (preserving Byparr cache)..."
             
-            # Clean ALL Docker build cache
+            # Clean Docker build cache only
             echo "  → Cleaning build cache..."
             sudo docker builder prune -af
             
             # Clean unused images (keep running ones)
             echo "  → Cleaning unused images..."
             sudo docker image prune -af
-            
-            # Clean unused volumes
-            echo "  → Cleaning unused volumes..."
-            sudo docker volume prune -f
-            
-            # Clean system cache
-            echo "  → Cleaning system cache..."
-            sudo docker system prune -af --volumes
             
             # Clean apt cache
             echo "  → Cleaning apt cache..."
@@ -153,8 +145,10 @@ jobs:
             echo "  → Cleaning old logs..."
             sudo journalctl --vacuum-time=3d 2>/dev/null || true
             
+            echo "  ✅ Cleanup complete (Byparr cache preserved)"
+            
             echo ""
-            echo "✅ Deployment and cleanup complete!"
+            echo "✅ Deployment complete!"
           ENDSSH
 
       - name: Verify deployment
