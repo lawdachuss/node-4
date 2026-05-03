@@ -113,9 +113,9 @@ type settings struct {
 	ImgBBAPIKey         string `json:"imgbb_api_key,omitempty"`
 }
 
-// SaveSettings persists the current cookies and user-agent to disk.
-func SaveSettings() error {
-	s := settings{
+// buildSettingsFromConfig creates a settings struct from the current server config.
+func buildSettingsFromConfig() settings {
+	return settings{
 		Cookies:             server.Config.Cookies,
 		UserAgent:           server.Config.UserAgent,
 		CompletedDir:        server.Config.CompletedDir,
@@ -145,6 +145,89 @@ func SaveSettings() error {
 		SupabaseAPIKey:      server.Config.SupabaseAPIKey,
 		ImgBBAPIKey:         server.Config.ImgBBAPIKey,
 	}
+}
+
+// toSupabaseAppSettings converts the local settings struct to the Supabase AppSettings type.
+func (s settings) toSupabaseAppSettings() supabase.AppSettings {
+	return supabase.AppSettings{
+		Cookies:             s.Cookies,
+		UserAgent:           s.UserAgent,
+		CompletedDir:        s.CompletedDir,
+		FinalizeMode:        s.FinalizeMode,
+		FFmpegEncoder:       s.FFmpegEncoder,
+		FFmpegContainer:     s.FFmpegContainer,
+		FFmpegQuality:       s.FFmpegQuality,
+		FFmpegPreset:        s.FFmpegPreset,
+		NtfyURL:             s.NtfyURL,
+		NtfyTopic:           s.NtfyTopic,
+		NtfyToken:           s.NtfyToken,
+		DiscordWebhookURL:   s.DiscordWebhookURL,
+		DiskWarningPercent:  s.DiskWarningPercent,
+		DiskCriticalPercent: s.DiskCriticalPercent,
+		CFChannelThreshold:  s.CFChannelThreshold,
+		CFGlobalThreshold:   s.CFGlobalThreshold,
+		NotifyCooldownHours: s.NotifyCooldownHours,
+		NotifyStreamOnline:  s.NotifyStreamOnline,
+		StripchatPDKey:      s.StripchatPDKey,
+		EnableGoFileUpload:  s.EnableGoFileUpload,
+		TurboViPlayAPIKey:   s.TurboViPlayAPIKey,
+		VoeSXAPIKey:         s.VoeSXAPIKey,
+		StreamtapeLogin:     s.StreamtapeLogin,
+		StreamtapeAPIKey:    s.StreamtapeAPIKey,
+		SupabaseURL:         s.SupabaseURL,
+		SupabaseAPIKey:      s.SupabaseAPIKey,
+		ImgBBAPIKey:         s.ImgBBAPIKey,
+	}
+}
+
+// fromSupabaseAppSettings converts Supabase AppSettings to the local settings struct.
+func fromSupabaseAppSettings(a *supabase.AppSettings) settings {
+	return settings{
+		Cookies:             a.Cookies,
+		UserAgent:           a.UserAgent,
+		CompletedDir:        a.CompletedDir,
+		FinalizeMode:        a.FinalizeMode,
+		FFmpegEncoder:       a.FFmpegEncoder,
+		FFmpegContainer:     a.FFmpegContainer,
+		FFmpegQuality:       a.FFmpegQuality,
+		FFmpegPreset:        a.FFmpegPreset,
+		NtfyURL:             a.NtfyURL,
+		NtfyTopic:           a.NtfyTopic,
+		NtfyToken:           a.NtfyToken,
+		DiscordWebhookURL:   a.DiscordWebhookURL,
+		DiskWarningPercent:  a.DiskWarningPercent,
+		DiskCriticalPercent: a.DiskCriticalPercent,
+		CFChannelThreshold:  a.CFChannelThreshold,
+		CFGlobalThreshold:   a.CFGlobalThreshold,
+		NotifyCooldownHours: a.NotifyCooldownHours,
+		NotifyStreamOnline:  a.NotifyStreamOnline,
+		StripchatPDKey:      a.StripchatPDKey,
+		EnableGoFileUpload:  a.EnableGoFileUpload,
+		TurboViPlayAPIKey:   a.TurboViPlayAPIKey,
+		VoeSXAPIKey:         a.VoeSXAPIKey,
+		StreamtapeLogin:     a.StreamtapeLogin,
+		StreamtapeAPIKey:    a.StreamtapeAPIKey,
+		SupabaseURL:         a.SupabaseURL,
+		SupabaseAPIKey:      a.SupabaseAPIKey,
+		ImgBBAPIKey:         a.ImgBBAPIKey,
+	}
+}
+
+// SaveSettings persists the current settings to Supabase (primary) and local file (backup).
+func SaveSettings() error {
+	s := buildSettingsFromConfig()
+
+	// Save to Supabase first (primary storage)
+	if server.SupabaseClient != nil {
+		log.Println("[SETTINGS] saving to Supabase...")
+		if err := server.SupabaseClient.SaveSettings(s.toSupabaseAppSettings()); err != nil {
+			log.Printf("[SETTINGS] ⚠️  failed to save to Supabase: %v (will save locally)", err)
+		} else {
+			log.Println("[SETTINGS] ✓ saved to Supabase")
+		}
+	}
+
+	// Also save to local file as backup
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal settings: %w", err)
@@ -155,11 +238,30 @@ func SaveSettings() error {
 	return atomicWriteFile(settingsFile, b, 0600)
 }
 
-// LoadSettings reads persisted cookies and user-agent from disk and applies
-// them to server.Config, overriding any CLI-provided values.
+// LoadSettings loads settings from Supabase (primary) with local file fallback.
+// If settings are loaded from a local file and Supabase is available, it auto-migrates
+// the settings to Supabase for future runs.
 func LoadSettings() error {
+	// Try Supabase first if client is available
+	if server.SupabaseClient != nil {
+		log.Println("[SETTINGS] loading from Supabase...")
+		appSettings, err := server.SupabaseClient.GetSettings()
+		if err != nil {
+			log.Printf("[SETTINGS] ⚠️  failed to load from Supabase: %v (falling back to local file)", err)
+		} else if appSettings != nil {
+			log.Println("[SETTINGS] ✓ loaded from Supabase")
+			s := fromSupabaseAppSettings(appSettings)
+			applySettings(s)
+			return nil
+		} else {
+			log.Println("[SETTINGS] no settings in Supabase yet, checking local file...")
+		}
+	}
+
+	// Fall back to local file
 	b, err := os.ReadFile(settingsFile)
 	if os.IsNotExist(err) {
+		log.Println("[SETTINGS] no local settings file found, using defaults")
 		return nil
 	}
 	if err != nil {
@@ -169,6 +271,25 @@ func LoadSettings() error {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return fmt.Errorf("unmarshal settings: %w", err)
 	}
+
+	log.Println("[SETTINGS] ✓ loaded from local file")
+	applySettings(s)
+
+	// Auto-migrate local settings to Supabase if client is available
+	if server.SupabaseClient != nil {
+		log.Println("[SETTINGS] migrating local settings to Supabase...")
+		if err := server.SupabaseClient.SaveSettings(s.toSupabaseAppSettings()); err != nil {
+			log.Printf("[SETTINGS] ⚠️  migration to Supabase failed: %v", err)
+		} else {
+			log.Println("[SETTINGS] ✓ settings migrated to Supabase")
+		}
+	}
+
+	return nil
+}
+
+// applySettings applies a settings struct to the global server.Config.
+func applySettings(s settings) {
 	if s.Cookies != "" {
 		server.Config.Cookies = s.Cookies
 	}
@@ -216,8 +337,13 @@ func LoadSettings() error {
 	server.Config.VoeSXAPIKey = s.VoeSXAPIKey
 	server.Config.StreamtapeLogin = s.StreamtapeLogin
 	server.Config.StreamtapeAPIKey = s.StreamtapeAPIKey
-	server.Config.SupabaseURL = s.SupabaseURL
-	server.Config.SupabaseAPIKey = s.SupabaseAPIKey
+	// Only overwrite Supabase credentials from settings if not already set (env/CLI take priority)
+	if server.Config.SupabaseURL == "" {
+		server.Config.SupabaseURL = s.SupabaseURL
+	}
+	if server.Config.SupabaseAPIKey == "" {
+		server.Config.SupabaseAPIKey = s.SupabaseAPIKey
+	}
 	server.Config.ImgBBAPIKey = s.ImgBBAPIKey
 	if server.Config.FFmpegEncoder == "" {
 		server.Config.FFmpegEncoder = "libx264"
@@ -231,7 +357,6 @@ func LoadSettings() error {
 	if server.Config.FFmpegPreset == "" {
 		server.Config.FFmpegPreset = "medium"
 	}
-	return nil
 }
 
 func renderPatternSample(conf *entity.ChannelConfig) (string, error) {

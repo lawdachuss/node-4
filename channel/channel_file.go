@@ -18,7 +18,6 @@ import (
 
 	"github.com/HeapOfChaos/goondvr/chaturbate"
 	"github.com/HeapOfChaos/goondvr/server"
-	"github.com/HeapOfChaos/goondvr/supabase"
 	"github.com/HeapOfChaos/goondvr/uploader"
 )
 
@@ -514,24 +513,11 @@ func (ch *Channel) finalizeRecordingAsync(filename string, recordedDuration floa
 				}
 			}
 
-			// Store all successful upload links in database
-			// Only create database folders and log after successful upload
-			// Store in GitHub Actions database (JSON files) - creates folders only on success
-			ch.Info("💾 logging upload to GitHub Actions database...")
-			if err := ch.logUploadToDatabase(finalPath, gofileLink, turboviplayLink, voesxLink, streamtapeLink, thumbnailLink, recordedDuration, recordedFilesize); err != nil {
-				ch.Error("❌ failed to log upload to GitHub Actions database: %s", err.Error())
-			} else {
-				ch.Info("✓ upload logged to GitHub Actions database")
-			}
-			
-			// Store upload records in Supabase when enabled (independent of EnableSupabase flag)
-			// The flag controls whether uploads happen, but if we have credentials, we should use them
-			if server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "" {
+			// Store upload records in Supabase (primary storage)
+			if server.SupabaseClient != nil {
 				ch.Info("💾 storing upload record in Supabase...")
-				supabaseClient := supabase.NewClient(server.Config.SupabaseURL, server.Config.SupabaseAPIKey)
 				
-				// Store single record with all links
-				if err := supabaseClient.InsertMultiHostUploadRecord(
+				if err := server.SupabaseClient.InsertMultiHostUploadRecord(
 					ch.Config.Username,
 					filepath.Base(finalPath),
 					gofileLink,
@@ -540,12 +526,25 @@ func (ch *Channel) finalizeRecordingAsync(filename string, recordedDuration floa
 					streamtapeLink,
 					thumbnailLink,
 				); err != nil {
-					ch.Error("❌ failed to store multi-host upload record in Supabase: %s", err.Error())
+					ch.Error("❌ failed to store upload record in Supabase: %s", err.Error())
+					// Fall back to local database if Supabase fails
+					ch.Info("💾 falling back to local database...")
+					if err := ch.logUploadToDatabase(finalPath, gofileLink, turboviplayLink, voesxLink, streamtapeLink, thumbnailLink, recordedDuration, recordedFilesize); err != nil {
+						ch.Error("❌ failed to log upload to local database: %s", err.Error())
+					} else {
+						ch.Info("✓ upload logged to local database (fallback)")
+					}
 				} else {
-					ch.Info("✓ multi-host upload record stored in Supabase (%d hosts)", len(successfulUploads))
+					ch.Info("✓ upload record stored in Supabase (%d hosts)", len(successfulUploads))
 				}
 			} else {
-				ch.Info("⚠️  Supabase credentials not configured, skipping Supabase upload")
+				// No Supabase client — use local database
+				ch.Info("💾 logging upload to local database...")
+				if err := ch.logUploadToDatabase(finalPath, gofileLink, turboviplayLink, voesxLink, streamtapeLink, thumbnailLink, recordedDuration, recordedFilesize); err != nil {
+					ch.Error("❌ failed to log upload to local database: %s", err.Error())
+				} else {
+					ch.Info("✓ upload logged to local database")
+				}
 			}
 			
 			// Step 3: Delete local file only after successful upload and database logging
@@ -1103,19 +1102,10 @@ func (ch *Channel) ProcessOrphanedFile(filePath string) {
 				}
 			}
 
-			// Store in GitHub Actions database (JSON files)
-			if err := ch.logUploadToDatabase(finalPath, gofileLink, turboviplayLink, voesxLink, streamtapeLink, thumbnailLink, approximateDuration, fileInfo.Size()); err != nil {
-				ch.Error("failed to log upload to GitHub Actions database: %s", err.Error())
-			} else {
-				ch.Info("upload logged to GitHub Actions database")
-			}
-			
-			// Store upload records in Supabase when credentials are available
-			if server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "" {
+			// Store in Supabase (primary) or local database (fallback)
+			if server.SupabaseClient != nil {
 				ch.Info("storing orphaned file upload record in Supabase...")
-				supabaseClient := supabase.NewClient(server.Config.SupabaseURL, server.Config.SupabaseAPIKey)
-				// Store single record with all links (reuse vars from outer scope)
-				if err := supabaseClient.InsertMultiHostUploadRecord(
+				if err := server.SupabaseClient.InsertMultiHostUploadRecord(
 					ch.Config.Username,
 					filepath.Base(finalPath),
 					gofileLink,
@@ -1124,12 +1114,23 @@ func (ch *Channel) ProcessOrphanedFile(filePath string) {
 					streamtapeLink,
 					thumbnailLink,
 				); err != nil {
-					ch.Error("failed to store multi-host upload record in Supabase: %s", err.Error())
+					ch.Error("failed to store upload record in Supabase: %s", err.Error())
+					// Fall back to local database
+					if err := ch.logUploadToDatabase(finalPath, gofileLink, turboviplayLink, voesxLink, streamtapeLink, thumbnailLink, approximateDuration, fileInfo.Size()); err != nil {
+						ch.Error("failed to log upload to local database: %s", err.Error())
+					} else {
+						ch.Info("upload logged to local database (fallback)")
+					}
 				} else {
-					ch.Info("✓ multi-host upload record stored in Supabase (%d hosts)", len(successfulUploads))
+					ch.Info("✓ orphaned file upload record stored in Supabase (%d hosts)", len(successfulUploads))
 				}
 			} else {
-				ch.Info("Supabase credentials not configured, skipping Supabase upload")
+				// No Supabase client — use local database
+				if err := ch.logUploadToDatabase(finalPath, gofileLink, turboviplayLink, voesxLink, streamtapeLink, thumbnailLink, approximateDuration, fileInfo.Size()); err != nil {
+					ch.Error("failed to log upload to local database: %s", err.Error())
+				} else {
+					ch.Info("upload logged to local database")
+				}
 			}
 			
 			// Step 3: Delete local file after successful upload

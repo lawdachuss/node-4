@@ -32,7 +32,7 @@ func New(c *cli.Context) (*entity.Config, error) {
 		Debug:           c.Bool("debug"),
 		StripchatPDKey:  c.String("stripchat-pdkey"),
 		EnableGoFileUpload: c.Bool("enable-gofile-upload"),
-		EnableSupabase:      false,
+		EnableSupabase:      c.String("supabase-url") != "" && c.String("supabase-api-key") != "",
 		TurboViPlayAPIKey:   c.String("turboviplay-api-key"),
 		VoeSXAPIKey:         c.String("voesx-api-key"),
 		StreamtapeLogin:     c.String("streamtape-login"),

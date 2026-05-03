@@ -192,12 +192,23 @@ func start(c *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("new config: %w", err)
 	}
+
+	// Initialize Supabase early so settings + channels can be loaded from it.
+	// This uses CLI flags or environment variables for the URL and API key.
+	server.InitSupabase()
+
+	// Load settings from Supabase (primary) with local file fallback.
+	// If settings are loaded from a local file and contain Supabase credentials
+	// that weren't available via CLI/env, we re-init the client.
 	if err := manager.LoadSettings(); err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
-	
-	// Initialize Supabase client if configured
-	server.InitSupabase()
+
+	// Re-initialize Supabase if credentials came from settings and client wasn't
+	// already created (e.g. running locally without env vars but with settings.json).
+	if server.SupabaseClient == nil && server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "" {
+		server.InitSupabase()
+	}
 	
 	server.Manager, err = manager.New()
 	if err != nil {

@@ -31,66 +31,26 @@ jobs:
           echo "[INFO] Initial disk space:"
           df -h /
       
-      - name: Create settings.json from secrets
+      - name: Verify Supabase credentials
         env:
-          SETTINGS_CONTENT: ${{ secrets.SETTINGS_JSON }}
-        run: |
-          echo "[INFO] Creating settings.json from secrets"
-          if [ -z "$SETTINGS_CONTENT" ]; then
-            echo "[ERROR] SETTINGS_JSON secret not found"
-            echo ""
-            echo "Please add SETTINGS_JSON secret in GitHub repository settings:"
-            echo "1. Go to: https://github.com/${{ github.repository }}/settings/secrets/actions"
-            echo "2. Click 'New repository secret'"
-            echo "3. Name: SETTINGS_JSON"
-            echo "4. Value: Copy your entire settings.json content"
-            echo ""
-            exit 1
-          fi
-          
-          echo "$SETTINGS_CONTENT" > settings.json
-          echo "[SUCCESS] settings.json created"
-      
-      - name: Create channels.json from secrets (if exists)
-        env:
-          CHANNELS_CONTENT: ${{ secrets.CHANNELS_JSON }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
         run: |
-          echo "[INFO] Setting up channels"
-          
-          # First, try to sync from Supabase
-          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_API_KEY" ]; then
-            echo "[INFO] Attempting to sync channels from Supabase"
-            chmod +x scripts/sync-channels-from-supabase.sh
-            ./scripts/sync-channels-from-supabase.sh || echo "[WARN] Supabase sync failed, will use secret"
+          echo "[INFO] Checking Supabase credentials..."
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_API_KEY" ]; then
+            echo "[ERROR] Supabase credentials not configured"
+            echo ""
+            echo "Please add these secrets in GitHub repository settings:"
+            echo "1. Go to: https://github.com/${{ github.repository }}/settings/secrets/actions"
+            echo "2. Add: SUPABASE_URL (your Supabase project URL)"
+            echo "3. Add: SUPABASE_API_KEY (your Supabase anon/service key)"
+            echo ""
+            echo "All settings, channels, and upload records are stored in Supabase."
+            echo "No other secrets are needed."
+            exit 1
           fi
-          
-          # If channels.json doesn't exist or is empty, use secret
-          if [ ! -f "conf/channels.json" ] || [ ! -s "conf/channels.json" ]; then
-            echo "[INFO] Creating channels.json from secret"
-            if [ -z "$CHANNELS_CONTENT" ]; then
-              echo "[WARN] CHANNELS_JSON secret not found - creating empty file"
-              echo "[]" > conf/channels.json
-            else
-              echo "$CHANNELS_CONTENT" > conf/channels.json
-              echo "[SUCCESS] channels.json created from secret"
-              
-              # Sync to Supabase for future runs
-              if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_API_KEY" ]; then
-                echo "[INFO] Syncing channels to Supabase"
-                chmod +x scripts/sync-channels-to-supabase.sh
-                ./scripts/sync-channels-to-supabase.sh || echo "[WARN] Failed to sync to Supabase"
-              fi
-            fi
-          fi
-          
-          # Show channel info
-          if [ -f "conf/channels.json" ]; then
-            TOTAL=$(jq '. | length' conf/channels.json)
-            ACTIVE=$(jq '[.[] | select(.is_paused == false)] | length' conf/channels.json)
-            echo "[INFO] Total channels: $TOTAL, Active: $ACTIVE"
-          fi
+          echo "[SUCCESS] Supabase credentials found"
+          echo "[INFO] Settings and channels will be loaded from Supabase on startup"
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -196,20 +156,6 @@ jobs:
         run: |
           echo "🚀 Starting Docker container at $(date)"
           
-          # Show what we have
-          echo "📋 Checking files:"
-          ls -la settings.json 2>/dev/null && echo "✅ settings.json exists" || echo "❌ settings.json missing"
-          ls -la conf/channels.json 2>/dev/null && echo "✅ channels.json exists" || echo "❌ channels.json missing"
-          
-          # Show file contents (first few lines)
-          echo ""
-          echo "📄 settings.json preview:"
-          head -5 settings.json 2>/dev/null || echo "Cannot read settings.json"
-          echo ""
-          echo "📄 channels.json preview:"
-          head -5 conf/channels.json 2>/dev/null || echo "Cannot read channels.json"
-          echo ""
-          
           # Check if Byparr is available
           BYPARR_URL=""
           if docker ps 2>/dev/null | grep -q byparr; then
@@ -219,9 +165,9 @@ jobs:
             echo "⚠️ Byparr not available, will use cookies only"
           fi
           
-          # Start the container
           echo ""
           echo "🐳 Starting goondvr container..."
+          echo "[INFO] Settings and channels will be loaded from Supabase"
           
           if [ -n "$BYPARR_URL" ]; then
             docker run -d \
@@ -229,26 +175,18 @@ jobs:
               --network recorder-network \
               -p 8080:8080 \
               -e FLARESOLVERR_URL="$BYPARR_URL" \
-              -e IMGBB_API_KEY="${{ secrets.IMGBB_API_KEY }}" \
               -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
               -e SUPABASE_API_KEY="${{ secrets.SUPABASE_API_KEY }}" \
               -v $(pwd)/videos:/usr/src/app/videos \
-              -v $(pwd)/database:/usr/src/app/database \
-              -v $(pwd)/conf:/usr/src/app/conf \
-              -v $(pwd)/settings.json:/usr/src/app/settings.json \
               goondvr:latest --port 8080 --enable-gofile-upload --debug
           else
             docker run -d \
               --name goondvr \
               --network recorder-network \
               -p 8080:8080 \
-              -e IMGBB_API_KEY="${{ secrets.IMGBB_API_KEY }}" \
               -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
               -e SUPABASE_API_KEY="${{ secrets.SUPABASE_API_KEY }}" \
               -v $(pwd)/videos:/usr/src/app/videos \
-              -v $(pwd)/database:/usr/src/app/database \
-              -v $(pwd)/conf:/usr/src/app/conf \
-              -v $(pwd)/settings.json:/usr/src/app/settings.json \
               goondvr:latest --port 8080 --enable-gofile-upload --debug
           fi
           
@@ -383,19 +321,8 @@ jobs:
               break
             fi
             
-            # Sync channels from container every 5 minutes to capture UI changes
+            # The app syncs channels to Supabase directly — no external sync needed
             if [ $((CURRENT_TIME - LAST_CHANNEL_SYNC)) -gt 300 ]; then
-              echo "🔄 Syncing channels from container..."
-              docker exec goondvr cat /usr/src/app/conf/channels.json > conf/channels.json 2>/dev/null || true
-              
-              # Sync to Supabase if configured
-              if [ -n "${{ secrets.SUPABASE_URL }}" ] && [ -n "${{ secrets.SUPABASE_API_KEY }}" ]; then
-                export SUPABASE_URL="${{ secrets.SUPABASE_URL }}"
-                export SUPABASE_API_KEY="${{ secrets.SUPABASE_API_KEY }}"
-                chmod +x scripts/sync-channels-to-supabase.sh
-                ./scripts/sync-channels-to-supabase.sh 2>/dev/null || true
-              fi
-              
               LAST_CHANNEL_SYNC=$CURRENT_TIME
             fi
             
@@ -452,15 +379,7 @@ jobs:
           echo "[INFO] Initiating graceful shutdown..."
           echo ""
           
-          # Sync channels back to Supabase before stopping
-          if [ -n "${{ secrets.SUPABASE_URL }}" ] && [ -n "${{ secrets.SUPABASE_API_KEY }}" ]; then
-            echo "💾 Syncing channels to Supabase before shutdown..."
-            docker exec goondvr cat /usr/src/app/conf/channels.json > conf/channels.json 2>/dev/null || true
-            export SUPABASE_URL="${{ secrets.SUPABASE_URL }}"
-            export SUPABASE_API_KEY="${{ secrets.SUPABASE_API_KEY }}"
-            chmod +x scripts/sync-channels-to-supabase.sh
-            ./scripts/sync-channels-to-supabase.sh && echo "✅ Channels synced" || echo "⚠️  Failed to sync channels"
-          fi
+          # App's graceful shutdown handler saves channels to Supabase automatically
           
           # Give container time to finish current operations
           echo "⏳ Waiting for container to finish current operations (30 seconds)..."
@@ -599,18 +518,7 @@ jobs:
           echo ""
           
           # Step 1: Sync channels to Supabase (if not already done)
-          if [ -n "${{ secrets.SUPABASE_URL }}" ] && [ -n "${{ secrets.SUPABASE_API_KEY }}" ]; then
-            echo "💾 Step 1/6: Syncing channels to Supabase..."
-            if docker ps | grep -q goondvr; then
-              docker exec goondvr cat /usr/src/app/conf/channels.json > conf/channels.json 2>/dev/null || true
-            fi
-            export SUPABASE_URL="${{ secrets.SUPABASE_URL }}"
-            export SUPABASE_API_KEY="${{ secrets.SUPABASE_API_KEY }}"
-            chmod +x scripts/sync-channels-to-supabase.sh
-            ./scripts/sync-channels-to-supabase.sh && echo "✅ Channels synced" || echo "⚠️  Sync failed"
-          else
-            echo "⏭️  Step 1/6: Skipping Supabase sync (not configured)"
-          fi
+          echo "💾 Step 1/6: App graceful shutdown handles syncing to Supabase natively"
           echo ""
           
           # Step 2: Stop Docker container gracefully

@@ -237,84 +237,70 @@ func UpdateConfig(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/")
 }
 
-// GetVideos returns all uploaded video records as JSON
+// GetVideos returns all uploaded video records as JSON.
+// Supabase is the primary data source; local database is used as fallback only.
 func GetVideos(c *gin.Context) {
 	var allRecords []map[string]interface{}
 	var supabaseCount, localCount int
 	var supabaseError string
-	
-	// Try Supabase first if credentials are configured
-	if server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "" {
+
+	// Supabase is the primary data source
+	if server.SupabaseClient != nil {
 		log.Printf("[API] Fetching videos from Supabase...")
-		if server.SupabaseClient == nil {
-			supabaseError = "Supabase client not initialized"
-			log.Printf("[API] ERROR: %s", supabaseError)
+		records, err := server.SupabaseClient.GetAllUploads()
+		if err != nil {
+			supabaseError = err.Error()
+			log.Printf("[API] Supabase fetch failed: %v, falling back to local database", err)
 		} else {
-			records, err := server.SupabaseClient.GetAllUploads()
-			if err != nil {
-				supabaseError = err.Error()
-				log.Printf("[API] Supabase fetch failed: %v, falling back to local database", err)
-			} else {
-				supabaseCount = len(records)
-				log.Printf("[API] Fetched %d videos from Supabase", supabaseCount)
-				// Convert to generic map format
-				for _, record := range records {
-					allRecords = append(allRecords, map[string]interface{}{
-						"id":                record.ID,
-						"streamer_name":     record.StreamerName,
-						"filename":          record.Filename,
-						"gofile_link":       record.GofileLink,
-						"turboviplay_link":  record.TurboViPlayLink,
-						"voesx_link":        record.VoeSXLink,
-						"streamtape_link":   record.StreamtapeLink,
-						"thumbnail_link":    record.ThumbnailLink,
-						"upload_date":       record.UploadDate,
-						"source":            "supabase",
-					})
-				}
+			supabaseCount = len(records)
+			log.Printf("[API] Fetched %d videos from Supabase", supabaseCount)
+			for _, record := range records {
+				allRecords = append(allRecords, map[string]interface{}{
+					"id":                record.ID,
+					"streamer_name":     record.StreamerName,
+					"filename":          record.Filename,
+					"gofile_link":       record.GofileLink,
+					"turboviplay_link":  record.TurboViPlayLink,
+					"voesx_link":        record.VoeSXLink,
+					"streamtape_link":   record.StreamtapeLink,
+					"thumbnail_link":    record.ThumbnailLink,
+					"upload_date":       record.UploadDate,
+					"source":            "supabase",
+				})
 			}
 		}
 	} else {
-		supabaseError = "Supabase not configured (missing URL or API key)"
+		supabaseError = "Supabase client not initialized"
 		log.Printf("[API] %s", supabaseError)
 	}
-	
-	// Also read from local JSON database (as backup/supplement)
-	log.Printf("[API] Fetching videos from local database...")
-	localRecords := readLocalDatabase()
-	localCount = len(localRecords)
-	log.Printf("[API] Fetched %d videos from local database", localCount)
-	allRecords = append(allRecords, localRecords...)
-	
+
+	// Fall back to local database only if Supabase returned no results
+	if len(allRecords) == 0 {
+		log.Printf("[API] Fetching videos from local database (fallback)...")
+		localRecords := readLocalDatabase()
+		localCount = len(localRecords)
+		log.Printf("[API] Fetched %d videos from local database", localCount)
+		allRecords = append(allRecords, localRecords...)
+	}
+
 	totalCount := len(allRecords)
-	log.Printf("[API] Total videos: %d (Supabase: %d, Local: %d)", totalCount, supabaseCount, localCount)
-	
-	// Enhanced response with debugging info
+
 	response := gin.H{
-		"videos": allRecords, 
-		"count": totalCount,
+		"videos": allRecords,
+		"count":  totalCount,
 		"debug": gin.H{
-			"supabase_configured": server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "",
 			"supabase_client_initialized": server.SupabaseClient != nil,
-			"supabase_count": supabaseCount,
-			"supabase_error": supabaseError,
-			"local_count": localCount,
-			"local_database_path": "database/",
-			"total_count": totalCount,
+			"supabase_count":              supabaseCount,
+			"supabase_error":              supabaseError,
+			"local_count":                 localCount,
+			"total_count":                 totalCount,
 		},
 	}
-	
-	// If no videos found, add helpful message
+
 	if totalCount == 0 {
 		response["message"] = "No videos found. Videos will appear here after they are recorded and uploaded."
-		if supabaseError != "" {
-			response["supabase_status"] = supabaseError
-		}
-		if localCount == 0 {
-			response["local_status"] = "No local database files found"
-		}
 	}
-	
+
 	c.JSON(http.StatusOK, response)
 }
 
@@ -415,79 +401,73 @@ func readLocalDatabase() []map[string]interface{} {
 	return allRecords
 }
 
-// GetVideosByUsername returns all uploaded video records for a specific username
+// GetVideosByUsername returns all uploaded video records for a specific username.
+// Supabase is the primary data source; local database is used as fallback only.
 func GetVideosByUsername(c *gin.Context) {
 	username := c.Param("username")
 	var allRecords []map[string]interface{}
 	var supabaseCount, localCount int
 	var supabaseError string
-	
+
 	log.Printf("[API] Fetching videos for username: %s", username)
-	
-	// Try Supabase first if credentials are configured
-	if server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "" {
+
+	// Supabase is the primary data source
+	if server.SupabaseClient != nil {
 		log.Printf("[API] Fetching from Supabase for %s...", username)
-		if server.SupabaseClient == nil {
-			supabaseError = "Supabase client not initialized"
-			log.Printf("[API] ERROR: %s", supabaseError)
+		records, err := server.SupabaseClient.GetUploadsByStreamer(username)
+		if err != nil {
+			supabaseError = err.Error()
+			log.Printf("[API] Supabase fetch failed for %s: %v", username, err)
 		} else {
-			records, err := server.SupabaseClient.GetUploadsByStreamer(username)
-			if err != nil {
-				supabaseError = err.Error()
-				log.Printf("[API] Supabase fetch failed for %s: %v", username, err)
-			} else {
-				supabaseCount = len(records)
-				log.Printf("[API] Fetched %d videos from Supabase for %s", supabaseCount, username)
-				// Convert to generic map format
-				for _, record := range records {
-					allRecords = append(allRecords, map[string]interface{}{
-						"id":                record.ID,
-						"streamer_name":     record.StreamerName,
-						"filename":          record.Filename,
-						"gofile_link":       record.GofileLink,
-						"turboviplay_link":  record.TurboViPlayLink,
-						"voesx_link":        record.VoeSXLink,
-						"streamtape_link":   record.StreamtapeLink,
-						"thumbnail_link":    record.ThumbnailLink,
-						"upload_date":       record.UploadDate,
-						"source":            "supabase",
-					})
-				}
+			supabaseCount = len(records)
+			log.Printf("[API] Fetched %d videos from Supabase for %s", supabaseCount, username)
+			for _, record := range records {
+				allRecords = append(allRecords, map[string]interface{}{
+					"id":                record.ID,
+					"streamer_name":     record.StreamerName,
+					"filename":          record.Filename,
+					"gofile_link":       record.GofileLink,
+					"turboviplay_link":  record.TurboViPlayLink,
+					"voesx_link":        record.VoeSXLink,
+					"streamtape_link":   record.StreamtapeLink,
+					"thumbnail_link":    record.ThumbnailLink,
+					"upload_date":       record.UploadDate,
+					"source":            "supabase",
+				})
 			}
 		}
 	} else {
-		supabaseError = "Supabase not configured"
+		supabaseError = "Supabase client not initialized"
 	}
-	
-	// Also read from local JSON database
-	log.Printf("[API] Fetching from local database for %s...", username)
-	localRecords := readLocalDatabaseByUsername(username)
-	localCount = len(localRecords)
-	log.Printf("[API] Fetched %d videos from local database for %s", localCount, username)
-	allRecords = append(allRecords, localRecords...)
-	
+
+	// Fall back to local database only if Supabase returned no results
+	if len(allRecords) == 0 {
+		log.Printf("[API] Fetching from local database for %s (fallback)...", username)
+		localRecords := readLocalDatabaseByUsername(username)
+		localCount = len(localRecords)
+		log.Printf("[API] Fetched %d videos from local database for %s", localCount, username)
+		allRecords = append(allRecords, localRecords...)
+	}
+
 	totalCount := len(allRecords)
-	log.Printf("[API] Total videos for %s: %d (Supabase: %d, Local: %d)", username, totalCount, supabaseCount, localCount)
-	
+
 	response := gin.H{
-		"videos": allRecords, 
-		"count": totalCount, 
+		"videos":   allRecords,
+		"count":    totalCount,
 		"username": username,
 		"debug": gin.H{
-			"supabase_configured": server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "",
 			"supabase_client_initialized": server.SupabaseClient != nil,
-			"supabase_count": supabaseCount,
-			"supabase_error": supabaseError,
-			"local_count": localCount,
-			"total_count": totalCount,
+			"supabase_count":              supabaseCount,
+			"supabase_error":              supabaseError,
+			"local_count":                 localCount,
+			"total_count":                 totalCount,
 		},
 	}
-	
-	// If no videos found, add helpful message
+
 	if totalCount == 0 {
 		response["message"] = fmt.Sprintf("No videos found for %s. Videos will appear here after they are recorded and uploaded.", username)
 	}
-	
+
 	c.JSON(http.StatusOK, response)
 }
 
@@ -597,8 +577,8 @@ func GetVideoByID(c *gin.Context) {
 
 // GetDatabaseStats returns database statistics
 func GetDatabaseStats(c *gin.Context) {
-	if !server.Config.EnableSupabase || server.Config.SupabaseURL == "" || server.Config.SupabaseAPIKey == "" {
-		c.JSON(http.StatusOK, gin.H{"error": "Supabase is disabled"})
+	if server.SupabaseClient == nil {
+		c.JSON(http.StatusOK, gin.H{"error": "Supabase is not configured"})
 		return
 	}
 
