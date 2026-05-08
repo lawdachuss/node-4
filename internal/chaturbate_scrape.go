@@ -104,14 +104,6 @@ func ScrapeChaturbateStream(ctx context.Context, username string) (string, strin
 func ScrapeChaturbateStreamWithFlareSolverr(ctx context.Context, username string) (string, string, error) {
 	pageURL := fmt.Sprintf("%s%s/", server.Config.Domain, username)
 	
-	if server.Config.Debug {
-		flaresolverrURL := getFlareSolverrURL()
-		fmt.Printf("[DEBUG] Using FlareSolverr at %s\n", flaresolverrURL)
-	}
-	
-	// No pre-flight health check - just make the actual request
-	// If Byparr isn't ready, the request will fail with a clear error
-	// This avoids interfering with Byparr's initialization process
 	resp, err := GetFlareSolverrResponse(ctx, pageURL)
 	if err != nil {
 		return "", "", fmt.Errorf("flaresolverr failed: %w", err)
@@ -206,7 +198,7 @@ func GetFlareSolverrResponse(ctx context.Context, url string) (*FlareSolverrResp
 	}
 	
 	if server.Config.Debug {
-		fmt.Printf("[DEBUG] FlareSolverr: requesting %s (this may take 60-180 seconds for Cloudflare 2026 challenges)\n", url)
+		fmt.Printf("[DEBUG] FlareSolverr: requesting %s\n", url)
 	}
 	
 	// Use direct HTTP client with long timeout for FlareSolverr
@@ -216,41 +208,9 @@ func GetFlareSolverrResponse(ctx context.Context, url string) (*FlareSolverrResp
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	
-	// Start a progress indicator in debug mode
-	done := make(chan bool)
-	if server.Config.Debug {
-		go func() {
-			ticker := time.NewTicker(15 * time.Second)
-			defer ticker.Stop()
-			elapsed := 0
-			for {
-				select {
-				case <-ticker.C:
-					elapsed += 15
-					fmt.Printf("[DEBUG] FlareSolverr still working... (%ds elapsed)\n", elapsed)
-				case <-done:
-					return
-				}
-			}
-		}()
-	}
-	
 	client := &http.Client{Timeout: 360 * time.Second} // 6 minutes for Cloudflare challenges + queue wait
 	resp, err := client.Do(httpReq)
-	
-	// Stop progress indicator
-	if server.Config.Debug {
-		close(done)
-	}
-	
 	if err != nil {
-		// Provide more specific error messages
-		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline exceeded") {
-			return nil, fmt.Errorf("byparr timeout after 360s (cloudflare 2026 is very aggressive - consider residential proxies): %w", err)
-		}
-		if strings.Contains(err.Error(), "connection refused") {
-			return nil, fmt.Errorf("byparr not accessible at %s (is it running?): %w", flaresolverrURL, err)
-		}
 		return nil, fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()

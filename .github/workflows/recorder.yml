@@ -23,11 +23,6 @@ jobs:
   record:
     runs-on: ubuntu-latest
     timeout-minutes: 360  # 6h — 1h buffer over 5h recording
-    
-    # Add resource limits to prevent runner starvation
-    env:
-      DOCKER_BUILDKIT: 1
-      COMPOSE_DOCKER_CLI_BUILD: 1
 
     steps:
       - name: Checkout code
@@ -52,46 +47,16 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Start Byparr (Cloudflare bypass)
-        continue-on-error: false
+        continue-on-error: true
         run: |
           docker network create recorder-network 2>/dev/null || true
-          
-          echo "📥 Pulling Byparr image..."
-          docker pull ghcr.io/thephaseless/byparr:latest
-          
-          echo "🚀 Starting Byparr container..."
+          # Pre-pull Byparr in background while we continue
+          docker pull ghcr.io/thephaseless/byparr:latest &
+          PULL_PID=$!
+          wait $PULL_PID || true
           docker run -d --name byparr --network recorder-network -p 8191:8191 \
-            --memory="1.5g" \
-            --memory-swap="1.5g" \
             -e HOST=0.0.0.0 -e PORT=8191 -e TIMEOUT=180 -e LOG_LEVEL=INFO \
-            ghcr.io/thephaseless/byparr:latest
-          
-          echo "⏳ Waiting 60 seconds for Byparr to initialize..."
-          echo "   (Playwright browser engine needs time to start)"
-          sleep 60
-          
-          # Simple container health check (not API calls that interfere with initialization)
-          if ! docker ps --format '{{.Names}}' | grep -q '^byparr$'; then
-            echo "❌ Byparr container stopped unexpectedly!"
-            docker logs byparr --tail 50
-            exit 1
-          fi
-          
-          # Check if Uvicorn started (from logs)
-          if docker logs byparr 2>&1 | grep -q "Uvicorn running"; then
-            echo "✅ Byparr container is running and Uvicorn started"
-          else
-            echo "⚠️  Byparr container running but Uvicorn may not have started yet"
-            echo "Container logs:"
-            docker logs byparr --tail 30
-            echo ""
-            echo "Continuing anyway - Go code will handle errors if Byparr isn't ready"
-          fi
-          
-          echo ""
-          echo "📝 Note: Byparr may still be initializing its browser engine."
-          echo "   The recorder will wait for Byparr to be fully ready before making requests."
-          echo "   This approach worked successfully in run #74 (May 7th)."
+            ghcr.io/thephaseless/byparr:latest || true
 
       - name: Build and start recorder
         run: |
@@ -105,15 +70,10 @@ jobs:
           EXTRA_ARGS=""
           [ -n "$BYPARR_URL" ] && EXTRA_ARGS="-e FLARESOLVERR_URL=$BYPARR_URL"
 
-          # Add memory limits to prevent OOM issues
-          # GitHub Actions runners have ~7GB RAM, limit container to 4GB to leave room for system
           docker run -d --name goondvr \
             --restart=unless-stopped \
             --network recorder-network \
             -p 8080:8080 \
-            --memory="4g" \
-            --memory-swap="4g" \
-            --oom-kill-disable=false \
             $EXTRA_ARGS \
             -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
             -e SUPABASE_API_KEY="${{ secrets.SUPABASE_API_KEY }}" \
@@ -410,13 +370,8 @@ jobs:
           fi
 
           # Monitor tunnel health and recreate if it becomes inaccessible
-          # Store the monitoring PID so we can kill it later
           (
-            DURATION_HOURS="${{ github.event.inputs.duration_hours }}"
-            DURATION_HOURS="${DURATION_HOURS:-5}"
-            MONITOR_END_TIME=$(($(date +%s) + DURATION_HOURS * 3600 + 300))  # Add 5 min buffer
-            
-            while [ $(date +%s) -lt $MONITOR_END_TIME ]; do
+            while true; do
               sleep 120  # Check every 2 minutes
               
               # Check if process is alive
@@ -465,11 +420,7 @@ jobs:
                 fi
               fi
             done
-            echo "✅ Tunnel monitor exiting gracefully (time limit reached)"
           ) &
-          MONITOR_PID=$!
-          echo $MONITOR_PID > tunnel_monitor.pid
-          echo "Tunnel monitor PID: $MONITOR_PID"
 
       - name: Fallback to ngrok if Cloudflare fails
         if: steps.cloudflare_tunnel.outcome == 'failure'
@@ -567,14 +518,6 @@ jobs:
       - name: Record for 5 hours
         run: |
           graceful_shutdown() {
-            echo "⚠️  Graceful shutdown initiated..."
-            
-            # Kill background processes first
-            if [ -f tunnel_monitor.pid ]; then
-              MONITOR_PID=$(cat tunnel_monitor.pid)
-              kill $MONITOR_PID 2>/dev/null || true
-            fi
-            
             echo "⚠️  Saving recordings..."
             docker exec goondvr pkill -SIGTERM -f goondvr 2>/dev/null || true
             sleep 180
@@ -599,23 +542,13 @@ jobs:
           END_TIME=$(($(date +%s) + DURATION_HOURS * 3600))
           LAST_CLEANUP=0
           LAST_HEARTBEAT=0
-          RESTART_COUNT=0
-          MAX_RESTARTS=3
 
           while [ $(date +%s) -lt $END_TIME ] && [ "$CANCELLED" = false ]; do
             # Check if container is still running
             if ! docker ps --format '{{.Names}}' | grep -q '^goondvr$'; then
               echo "⚠️  Container stopped unexpectedly!"
               docker logs --tail 100 goondvr
-              
-              # Check restart limit
-              if [ $RESTART_COUNT -ge $MAX_RESTARTS ]; then
-                echo "❌ Maximum restart attempts ($MAX_RESTARTS) reached, exiting"
-                break
-              fi
-              
-              RESTART_COUNT=$((RESTART_COUNT + 1))
-              echo "⚠️  Attempting to restart container (attempt $RESTART_COUNT/$MAX_RESTARTS)..."
+              echo "⚠️  Attempting to restart container..."
               
               # Try to restart the container
               docker start goondvr 2>/dev/null || {
@@ -638,51 +571,6 @@ jobs:
             fi
 
             CURRENT_TIME=$(date +%s)
-            
-            # Monitor Docker container memory usage
-            CONTAINER_MEM=$(docker stats --no-stream --format "{{.MemPerc}}" goondvr 2>/dev/null | sed 's/%//' || echo "0")
-            CONTAINER_MEM=${CONTAINER_MEM%.*}  # Remove decimal part
-            
-            # Monitor system resources
-            MEMORY_USED=$(free | awk '/Mem:/ {printf "%.0f", $3/$2 * 100}')
-            
-            # If container is using >85% of its limit or system memory >85%, take action
-            if [ "$CONTAINER_MEM" -gt 85 ] || [ "$MEMORY_USED" -gt 85 ]; then
-              echo "⚠️  High memory usage detected - Container: ${CONTAINER_MEM}%, System: ${MEMORY_USED}%"
-              
-              # First, try to trigger upload to free up memory
-              echo "📤 Triggering emergency upload to free memory..."
-              curl -s -X POST -m 60 http://localhost:8080/api/upload/completed > /dev/null 2>&1 || true
-              
-              # Clean up Docker resources
-              echo "🧹 Running Docker cleanup..."
-              docker system prune -f 2>/dev/null || true
-              
-              # If still critical after cleanup, restart the container
-              sleep 10
-              MEMORY_AFTER=$(free | awk '/Mem:/ {printf "%.0f", $3/$2 * 100}')
-              if [ "$MEMORY_AFTER" -gt 90 ]; then
-                echo "❌ Memory still critical (${MEMORY_AFTER}%) after cleanup - restarting container..."
-                
-                # Save any in-progress recordings
-                docker exec goondvr pkill -SIGTERM -f goondvr 2>/dev/null || true
-                sleep 30
-                
-                # Restart container
-                docker restart goondvr
-                
-                # Wait for it to come back
-                for i in $(seq 1 30); do
-                  if curl -sf http://localhost:8080 > /dev/null 2>&1; then
-                    echo "✅ Container restarted successfully"
-                    break
-                  fi
-                  sleep 2
-                done
-              else
-                echo "✅ Memory usage improved to ${MEMORY_AFTER}%"
-              fi
-            fi
 
             # Disk space guard — upload early if >80% used
             DISK_USED=$(df / | awk 'NR==2{print $5}' | tr -d '%')
@@ -708,7 +596,7 @@ jobs:
                 -H "apikey: ${{ secrets.SUPABASE_API_KEY }}" \
                 -H "Content-Type: application/json" \
                 -H "Prefer: return=minimal" \
-                -d "{\"run_id\": ${{ github.run_number }}, \"timestamp\": \"$(date -u +%FT%TZ)\", \"tunnel_url\": \"$TUNNEL_URL\", \"disk_used_pct\": $DISK_USED, \"memory_used_pct\": $MEMORY_USED}" \
+                -d "{\"run_id\": ${{ github.run_number }}, \"timestamp\": \"$(date -u +%FT%TZ)\", \"tunnel_url\": \"$TUNNEL_URL\", \"disk_used_pct\": $DISK_USED}" \
                 > /dev/null 2>&1 || true
               LAST_HEARTBEAT=$CURRENT_TIME
             fi
@@ -736,12 +624,9 @@ jobs:
           echo "🔍 Checking for pending workflow runs..."
           
           # Check if there are already queued or in-progress runs
-          # Note: gh CLI doesn't support comma-separated status values, so we check each separately
-          QUEUED_RUNS=$(gh run list --workflow="24/7 Recorder" --status=queued --json databaseId --jq 'length')
-          IN_PROGRESS_RUNS=$(gh run list --workflow="24/7 Recorder" --status=in_progress --json databaseId --jq 'length')
-          PENDING_RUNS=$((QUEUED_RUNS + IN_PROGRESS_RUNS))
+          PENDING_RUNS=$(gh run list --workflow="24/7 Recorder" --status=queued,in_progress --json databaseId --jq 'length')
           
-          echo "Found $PENDING_RUNS pending/running workflow(s) (queued: $QUEUED_RUNS, in_progress: $IN_PROGRESS_RUNS)"
+          echo "Found $PENDING_RUNS pending/running workflow(s)"
           
           if [ "$PENDING_RUNS" -gt 0 ]; then
             echo "✅ Next run already queued or running, skipping trigger"
@@ -754,40 +639,12 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          echo "🧹 Starting cleanup..."
-          
-          # Kill tunnel monitor first
-          if [ -f tunnel_monitor.pid ]; then
-            MONITOR_PID=$(cat tunnel_monitor.pid)
-            echo "Stopping tunnel monitor (PID: $MONITOR_PID)..."
-            kill $MONITOR_PID 2>/dev/null || true
-            sleep 2
-          fi
-          
-          # Kill tunnel process
-          if [ -f tunnel.pid ]; then
-            TUNNEL_PID=$(cat tunnel.pid)
-            echo "Stopping tunnel (PID: $TUNNEL_PID)..."
-            kill $TUNNEL_PID 2>/dev/null || true
-          fi
-          pkill -f cloudflared 2>/dev/null || true
-          pkill -f ngrok 2>/dev/null || true
-          
-          # Stop Docker containers gracefully
-          echo "Stopping Docker containers..."
           docker stop --time=60 goondvr byparr 2>/dev/null || true
           docker rm -f goondvr byparr 2>/dev/null || true
           docker network rm recorder-network 2>/dev/null || true
-          
-          # Clean up Docker resources
-          echo "Cleaning up Docker resources..."
           docker system prune -af --volumes 2>/dev/null || true
-          
-          # Clean up files
-          echo "Cleaning up files..."
+          pkill -f cloudflared 2>/dev/null || true
           rm -rf videos/* database/* 2>/dev/null || true
-          
-          echo "✅ Cleanup complete"
 
       - name: Upload artifacts (emergency fallback)
         if: always()
