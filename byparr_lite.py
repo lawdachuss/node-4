@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""
+byparr_lite.py — Minimal FlareSolverr-compatible HTTP server using Playwright
+with the system Chromium (installed via nix).
+
+Replicates the docker-compose cookie-refresher architecture natively on Replit.
+Runs on port 8191 matching the app's default Byparr URL.
+
+Supported commands (FlareSolverr protocol):
+  sessions.create  → no-op
+  sessions.destroy → no-op
+  request.get      → opens URL in headless Chromium, waits for CF, returns cookies
+"""
+
+import json
+import os
+import shutil
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
+
+CHROMIUM_LOCK = Lock()
+
+# Use the nix system Chromium which has all its dependencies bundled.
+# Playwright's bundled headless shell requires extra system libs not available here.
+SYSTEM_CHROMIUM = shutil.which("chromium") or shutil.which("chromium-browser")
+
+
+def solve_cloudflare(url: str, max_timeout_ms: int = 180000) -> tuple:
+    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+
+    if not SYSTEM_CHROMIUM:
+        raise RuntimeError(
+            "chromium not found in PATH — ensure nix 'chromium' package is installed"
+        )
+
+    deadline = time.time() + (max_timeout_ms / 1000)
+    with CHROMIUM_LOCK:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                executable_path=SYSTEM_CHROMIUM,
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ],
+            )
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                )
+            )
+            page = context.new_page()
+
+            try:
+                page.goto(url, timeout=max_timeout_ms, wait_until="domcontentloaded")
+            except PWTimeout:
+                pass
+            except Exception as e:
+                print(f"[byparr-lite] goto error (continuing): {e}", flush=True)
+
+            # Poll for cf_clearance cookie (Cloudflare challenge completion)
+            while time.time() < deadline:
+                cookies = context.cookies()
+                if any(c["name"] == "cf_clearance" for c in cookies):
+                    print("[byparr-lite] cf_clearance obtained", flush=True)
+                    break
+                try:
+                    page.wait_for_timeout(2000)
+                except Exception:
+                    pass
+
+            all_cookies = context.cookies()
+            try:
+                user_agent = page.evaluate("navigator.userAgent")
+            except Exception:
+                user_agent = ""
+            browser.close()
+
+    return all_cookies, user_agent
+
+
+def make_ok_response(cookies: list, user_agent: str, url: str) -> dict:
+    return {
+        "status": "ok",
+        "message": "",
+        "solution": {
+            "url": url,
+            "status": 200,
+            "response": "",
+            "cookies": [
+                {
+                    "name": c["name"],
+                    "value": c["value"],
+                    "domain": c.get("domain", ""),
+                    "path": c.get("path", "/"),
+                    "expires": c.get("expires", -1),
+                    "size": len(c["name"]) + len(c["value"]),
+                    "httpOnly": c.get("httpOnly", False),
+                    "secure": c.get("secure", False),
+                    "sameSite": c.get("sameSite", "Lax"),
+                }
+                for c in cookies
+            ],
+            "userAgent": user_agent,
+        },
+    }
+
+
+class Handler(BaseHTTPRequestHandler):
+    def _send_json(self, code: int, data: dict):
+        body = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path in ("/", "/health", "/backend-health"):
+            self._send_json(200, {"status": "ok", "version": "byparr-lite"})
+        else:
+            self._send_json(404, {"status": "error", "message": "not found"})
+
+    def do_POST(self):
+        if self.path != "/v1":
+            self._send_json(404, {"status": "error", "message": "not found"})
+            return
+
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            req = json.loads(self.rfile.read(length))
+        except Exception as e:
+            self._send_json(400, {"status": "error", "message": f"bad json: {e}"})
+            return
+
+        cmd = req.get("cmd", "")
+
+        if cmd in ("sessions.create", "sessions.destroy", "sessions.list"):
+            self._send_json(200, {"status": "ok"})
+            return
+
+        if cmd == "request.get":
+            url = req.get("url", "")
+            max_timeout = req.get("maxTimeout", 60000)
+            print(f"[byparr-lite] Solving CF challenge for: {url}", flush=True)
+            try:
+                cookies, user_agent = solve_cloudflare(url, max_timeout)
+                cf_names = [
+                    c["name"]
+                    for c in cookies
+                    if c["name"] in ("cf_clearance", "csrftoken")
+                ]
+                print(f"[byparr-lite] Done — cookies: {cf_names}", flush=True)
+                self._send_json(200, make_ok_response(cookies, user_agent, url))
+            except Exception as e:
+                print(f"[byparr-lite] ERROR: {e}", flush=True)
+                self._send_json(500, {"status": "error", "message": str(e)})
+            return
+
+        self._send_json(400, {"status": "error", "message": f"unknown cmd: {cmd}"})
+
+    def log_message(self, fmt, *args):
+        print(f"[byparr-lite] {fmt % args}", flush=True)
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8191))
+    if SYSTEM_CHROMIUM:
+        print(f"[byparr-lite] Using Chromium: {SYSTEM_CHROMIUM}", flush=True)
+    else:
+        print("[byparr-lite] WARNING: chromium not found in PATH", flush=True)
+        sys.exit(1)
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    print(f"[byparr-lite] Listening on :{port}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass

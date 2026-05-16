@@ -2,6 +2,7 @@ package manager
 
 import (
         "bytes"
+        "context"
         "encoding/json"
         "fmt"
         "net/http"
@@ -10,10 +11,12 @@ import (
         "sort"
         "strings"
         "sync"
+        "time"
 
         "github.com/r3labs/sse/v2"
         "github.com/teacat/chaturbate-dvr/channel"
         "github.com/teacat/chaturbate-dvr/entity"
+        "github.com/teacat/chaturbate-dvr/internal"
         "github.com/teacat/chaturbate-dvr/router/view"
         "github.com/teacat/chaturbate-dvr/server"
 )
@@ -58,6 +61,49 @@ func (m *Manager) SaveConfig() error {
                 return fmt.Errorf("write file: %w", err)
         }
         return nil
+}
+
+// StartCookieRefresher launches a background goroutine that replicates the
+// docker-compose cookie-refresher service: it calls Byparr/FlareSolverr to
+// obtain fresh cf_clearance cookies and pushes them into the running config
+// automatically every 30 minutes. This makes Cloudflare bypass fully automatic
+// without requiring manual cookie entry or a separate container.
+func (m *Manager) StartCookieRefresher() {
+        go func() {
+                // Short delay so the rest of the app finishes initialising first.
+                time.Sleep(10 * time.Second)
+                for {
+                        m.refreshCookiesOnce()
+                        time.Sleep(30 * time.Minute)
+                }
+        }()
+        fmt.Println(" INFO [cookie-refresher] started — will refresh Cloudflare cookies every 30 minutes")
+}
+
+func (m *Manager) refreshCookiesOnce() {
+        ctx, cancel := context.WithTimeout(context.Background(), 250*time.Second)
+        defer cancel()
+
+        fmt.Println(" INFO [cookie-refresher] fetching fresh cookies from Byparr...")
+        cookies, userAgent, err := internal.GetFreshCookiesViaFlareSolverr(ctx, "https://chaturbate.com/")
+        if err != nil {
+                fmt.Printf("[WARN] [cookie-refresher] %v\n", err)
+                return
+        }
+        if cookies == "" {
+                fmt.Println("[WARN] [cookie-refresher] Byparr returned no cookies")
+                return
+        }
+
+        server.Config.Cookies = cookies
+        if userAgent != "" {
+                server.Config.UserAgent = userAgent
+        }
+        if err := server.SaveSettings(); err != nil {
+                fmt.Printf("[WARN] [cookie-refresher] could not persist cookies: %v\n", err)
+        } else {
+                fmt.Println(" INFO [cookie-refresher] cookies refreshed and saved — recording will resume shortly")
+        }
 }
 
 // LoadConfig loads the channels from JSON and starts them.

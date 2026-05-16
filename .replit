@@ -28,12 +28,16 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm ci && npm run build:css && go run . --port 5000"
+args = "npm ci && npm run build:css && python3 byparr_lite.py > /tmp/byparr.log 2>&1 & go run . --port 5000"
 waitForPort = 5000
 
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 8191
+externalPort = 3000
 
 [deployment]
 deploymentTarget = "vm"
