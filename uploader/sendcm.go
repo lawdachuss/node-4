@@ -27,12 +27,15 @@ func NewSendCMUploader(apiKey string) *SendCMUploader {
 	return &SendCMUploader{
 		apiKey: apiKey,
 		client: &http.Client{
-			Timeout: 30 * time.Minute,
+			Timeout: 60 * time.Minute, // Increased timeout for large files
 			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 100,
-				IdleConnTimeout:     90 * time.Second,
-				DisableCompression:  true,
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   100,
+				IdleConnTimeout:       90 * time.Second,
+				DisableCompression:    true,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
 			},
 		},
 	}
@@ -124,6 +127,13 @@ func (u *SendCMUploader) uploadFile(filePath string) (string, error) {
 	}
 	defer file.Close()
 
+	// Get file size for progress tracking
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat file: %w", err)
+	}
+	fileSize := fileInfo.Size()
+
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
@@ -152,34 +162,41 @@ func (u *SendCMUploader) uploadFile(filePath string) (string, error) {
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.ContentLength = int64(body.Len())
 
 	resp, err := u.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("do request: %w", err)
+		// Provide more context about the error
+		return "", fmt.Errorf("do request (file size: %d bytes, server: %s): %w", fileSize, uploadServer, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", fmt.Errorf("upload failed with status %d (file size: %d bytes): %s", resp.StatusCode, fileSize, string(bodyBytes))
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response body: %w", err)
 	}
 
 	var uploadResp sendcmUploadResponse
-	if err := json.NewDecoder(resp.Body).Decode(&uploadResp); err != nil {
-		return "", fmt.Errorf("decode upload response: %w", err)
+	if err := json.Unmarshal(bodyBytes, &uploadResp); err != nil {
+		return "", fmt.Errorf("decode upload response (body: %s): %w", string(bodyBytes), err)
 	}
 
-	if len(uploadResp) == 0 || uploadResp[0].FileStatus != "OK" {
-		status := ""
-		if len(uploadResp) > 0 {
-			status = uploadResp[0].FileStatus
-		}
-		return "", fmt.Errorf("upload failed: file_status=%s", status)
+	if len(uploadResp) == 0 {
+		return "", fmt.Errorf("empty upload response (body: %s)", string(bodyBytes))
+	}
+
+	if uploadResp[0].FileStatus != "OK" {
+		return "", fmt.Errorf("upload failed: file_status=%s (body: %s)", uploadResp[0].FileStatus, string(bodyBytes))
 	}
 
 	if uploadResp[0].FileCode == "" {
-		return "", fmt.Errorf("no file code in response")
+		return "", fmt.Errorf("no file code in response (body: %s)", string(bodyBytes))
 	}
 
 	viewURL := fmt.Sprintf("https://send.now/%s", uploadResp[0].FileCode)

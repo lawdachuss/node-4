@@ -318,3 +318,90 @@ func groupVideos(videos []*VideoEntry) []VideoGroup {
 	})
 	return groups
 }
+
+// getRecommendations returns recommended videos based on the current video
+// Recommendations are based on: same channel, similar tags, similar time, same gender
+func getRecommendations(currentVideo *VideoEntry, allVideos []*VideoEntry, limit int) []*VideoEntry {
+	if currentVideo == nil || len(allVideos) == 0 {
+		return nil
+	}
+
+	type scoredVideo struct {
+		video *VideoEntry
+		score float64
+	}
+
+	scored := make([]scoredVideo, 0)
+
+	for _, v := range allVideos {
+		// Skip the current video itself
+		if v.Filename == currentVideo.Filename {
+			continue
+		}
+
+		score := 0.0
+
+		// Same channel gets highest priority (50 points)
+		if strings.EqualFold(v.Username, currentVideo.Username) {
+			score += 50.0
+		}
+
+		// Same gender (10 points)
+		if v.Gender != "" && v.Gender == currentVideo.Gender {
+			score += 10.0
+		}
+
+		// Similar tags (5 points per matching tag)
+		if len(currentVideo.Tags) > 0 && len(v.Tags) > 0 {
+			matchingTags := 0
+			for _, tag1 := range currentVideo.Tags {
+				for _, tag2 := range v.Tags {
+					if strings.EqualFold(tag1, tag2) {
+						matchingTags++
+						break
+					}
+				}
+			}
+			score += float64(matchingTags) * 5.0
+		}
+
+		// Similar resolution (5 points)
+		if v.Resolution != "" && v.Resolution == currentVideo.Resolution {
+			score += 5.0
+		}
+
+		// Recent videos get bonus (up to 10 points based on recency)
+		if v.ModTimeSort != "" {
+			vTime, err1 := time.Parse(time.RFC3339, v.ModTimeSort)
+			cTime, err2 := time.Parse(time.RFC3339, currentVideo.ModTimeSort)
+			if err1 == nil && err2 == nil {
+				daysDiff := vTime.Sub(cTime).Hours() / 24
+				if daysDiff < 0 {
+					daysDiff = -daysDiff
+				}
+				// Videos within 7 days get bonus points
+				if daysDiff <= 7 {
+					score += (7 - daysDiff) / 7 * 10.0
+				}
+			}
+		}
+
+		// Only include videos with some relevance
+		if score > 0 {
+			scored = append(scored, scoredVideo{video: v, score: score})
+		}
+	}
+
+	// Sort by score descending
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	// Return top N recommendations
+	recommendations := make([]*VideoEntry, 0, limit)
+	for i := 0; i < len(scored) && i < limit; i++ {
+		recommendations = append(recommendations, scored[i].video)
+	}
+
+	return recommendations
+}

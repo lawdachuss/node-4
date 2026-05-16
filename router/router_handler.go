@@ -352,21 +352,32 @@ func VideoDetail(c *gin.Context) {
 				}
 			}
 		}
-		// Related: other recordings from the same channel
-		if chanData, ok := db.Channels[username]; ok {
-			for _, rec := range chanData.Recordings {
-				if rec.Filename == filename {
-					continue
-				}
-				if len(related) >= 4 {
-					break
-				}
-				related = append(related, *rec)
-			}
+		// Get smart recommendations based on multiple factors
+		allVideos := scanVideos()
+		currentVideo := &VideoEntry{
+			Username:    username,
+			Filename:    filename,
+			Tags:        tags,
+			Gender:      gender,
+			Resolution:  resolution,
+			Framerate:   framerate,
+			ModTimeSort: timestamp,
 		}
-		sort.Slice(related, func(i, j int) bool {
-			return related[i].Timestamp > related[j].Timestamp
-		})
+		recommendations := getRecommendations(currentVideo, allVideos, 8)
+		// Convert VideoEntry to RecordingEntry for template
+		for _, v := range recommendations {
+			related = append(related, RecordingEntry{
+				Filename:     v.Filename,
+				Timestamp:    v.ModTime,
+				RoomTitle:    v.RoomTitle,
+				Tags:         v.Tags,
+				Viewers:      v.Viewers,
+				Resolution:   v.Resolution,
+				Framerate:    v.Framerate,
+				ThumbnailURL: v.ThumbnailURL,
+				SpriteURL:    v.SpriteURL,
+			})
+		}
 	}
 
 	// If file is not on disk AND not in DB, redirect
@@ -522,7 +533,9 @@ func byseEmbedURL(fileCode, apiKey string) string {
 	if domain := byseEmbedDomainForKey(apiKey); domain != "" {
 		return "https://" + strings.Trim(domain, "/") + "/e/" + fileCode
 	}
-	return "https://api.byse.sx/e/" + fileCode
+	// Fallback to filemoon.sx (the old Byse domain) if API call fails
+	// Note: api.byse.sx is for API calls, not for embedding videos
+	return "https://filemoon.sx/e/" + fileCode
 }
 
 func byseEmbedDomainForKey(apiKey string) string {
@@ -548,26 +561,36 @@ func byseEmbedDomainForKey(apiKey string) string {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(reqURL)
 	if err != nil {
+		fmt.Printf("Byse: failed to fetch embed domain: %v\n", err)
 		return ""
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("Byse: embed domain API returned status %d\n", resp.StatusCode)
 		return ""
 	}
 
 	var data struct {
 		NewDomain string `json:"new_domain"`
+		OldDomain string `json:"old_domain"`
 		Status    int    `json:"status"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		fmt.Printf("Byse: failed to decode embed domain response: %v\n", err)
 		return ""
 	}
-	if data.Status != http.StatusOK || data.NewDomain == "" {
+	if data.Status != http.StatusOK {
+		fmt.Printf("Byse: embed domain API returned status code %d in response\n", data.Status)
+		return ""
+	}
+	if data.NewDomain == "" {
+		fmt.Printf("Byse: embed domain API returned empty new_domain (old_domain: %s)\n", data.OldDomain)
 		return ""
 	}
 
 	byseEmbedDomain = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(data.NewDomain), "https://"), "http://")
 	byseEmbedDomainFetchedAt = time.Now()
+	fmt.Printf("Byse: using embed domain: %s\n", byseEmbedDomain)
 	return byseEmbedDomain
 }
 
