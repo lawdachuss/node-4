@@ -450,25 +450,68 @@
             function renderEmbedPlayer(url) {
                 var section = document.getElementById('player-section');
                 if (section) {
-                    section.innerHTML = '<div class="bg-black rounded-xl overflow-hidden shadow-2xl" style="position:relative;padding-top:56.25%">' +
-                        '<iframe src="' + url + '" allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%" scrolling="no" frameborder="0" referrerpolicy="origin-when-cross-origin"></iframe>' +
-                        '</div>';
+                    section.innerHTML = '';
+                    var wrapper = document.createElement('div');
+                    wrapper.className = 'bg-black rounded-xl overflow-hidden shadow-2xl';
+                    wrapper.style.position = 'relative';
+                    wrapper.style.paddingTop = '56.25%';
+
+                    var iframe = document.createElement('iframe');
+                    iframe.src = url;
+                    iframe.allowFullscreen = true;
+                    iframe.scrolling = 'no';
+                    iframe.frameBorder = '0';
+                    iframe.referrerPolicy = 'origin-when-cross-origin';
+                    iframe.style.position = 'absolute';
+                    iframe.style.top = '0';
+                    iframe.style.left = '0';
+                    iframe.style.width = '100%';
+                    iframe.style.height = '100%';
+
+                    wrapper.appendChild(iframe);
+                    section.appendChild(wrapper);
                 }
             }
 
             function renderExternalVideoPlayer(url) {
                 var section = document.getElementById('player-section');
                 if (section) {
-                    section.innerHTML = '<div id="player-container" class="bg-black rounded-xl overflow-hidden shadow-2xl relative" data-state="loading">' +
-                        '<div id="loading-spinner" class="flex flex-col items-center justify-center gap-3 text-zinc-400" style="min-height:300px">' +
-                            '<svg class="w-10 h-10 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>' +
-                            '<span class="text-sm">Loading video...</span>' +
-                        '</div>' +
-                        '<video id="video-player" controls preload="metadata" class="w-full max-h-[75vh] hidden" onloadeddata="playerLoaded()" onerror="playerError()" onkeydown="handleVideoKeydown(event)" crossorigin="anonymous">' +
-                            '<source src="' + url + '" type="video/mp4" />' +
-                        '</video>' +
-                        '<div id="error-message" class="hidden flex-col items-center justify-center py-16 text-zinc-400"><p class="text-sm">Could not load video directly.</p></div>' +
-                    '</div>';
+                    section.innerHTML = '';
+                    var container = document.createElement('div');
+                    container.id = 'player-container';
+                    container.className = 'bg-black rounded-xl overflow-hidden shadow-2xl relative';
+                    container.setAttribute('data-state', 'loading');
+
+                    var loader = document.createElement('div');
+                    loader.id = 'loading-spinner';
+                    loader.className = 'flex flex-col items-center justify-center gap-3 text-zinc-400';
+                    loader.style.minHeight = '300px';
+                    loader.innerHTML = '<svg class="w-10 h-10 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg><span class="text-sm">Loading video...</span>';
+
+                    var video = document.createElement('video');
+                    video.id = 'video-player';
+                    video.controls = true;
+                    video.preload = 'metadata';
+                    video.className = 'w-full max-h-[75vh] hidden';
+                    video.crossOrigin = 'anonymous';
+                    video.onloadeddata = playerLoaded;
+                    video.onerror = playerError;
+                    video.onkeydown = handleVideoKeydown;
+
+                    var source = document.createElement('source');
+                    source.src = url;
+                    source.type = 'video/mp4';
+                    video.appendChild(source);
+
+                    var error = document.createElement('div');
+                    error.id = 'error-message';
+                    error.className = 'hidden flex-col items-center justify-center py-16 text-zinc-400';
+                    error.innerHTML = '<p class="text-sm">Could not load video directly.</p>';
+
+                    container.appendChild(loader);
+                    container.appendChild(video);
+                    container.appendChild(error);
+                    section.appendChild(container);
                 }
             }
 

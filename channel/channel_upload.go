@@ -75,8 +75,11 @@ func embedURLFromLink(host, link string) string {
 			return "https://voe.sx/e/" + code
 		}
 	case "Byse":
+		// Handle both download URLs (/d/) and embed URLs (/e/)
+		// Extract the file code from the last part of the URL
 		code := link[strings.LastIndex(link, "/")+1:]
 		if code != "" {
+			// Always return embed URL format for video playback
 			return "https://api.byse.sx/e/" + code
 		}
 	case "SendCM":

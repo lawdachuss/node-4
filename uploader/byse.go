@@ -181,6 +181,8 @@ func (u *ByseUploader) uploadFile(filePath string) (string, error) {
 		return "", fmt.Errorf("no file code in response")
 	}
 
-	viewURL := fmt.Sprintf("https://byse.sx/d/%s", uploadResp.Files[0].Filecode)
-	return viewURL, nil
+	// Return the embed URL for video playback, not the download URL
+	// The embed domain will be dynamically fetched when generating player URLs
+	embedURL := fmt.Sprintf("https://api.byse.sx/e/%s", uploadResp.Files[0].Filecode)
+	return embedURL, nil
 }

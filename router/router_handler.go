@@ -498,7 +498,11 @@ func embedURLForHostLink(host, link, byseAPIKey string) string {
 			return "https://streamtape.com/e/" + code
 		}
 	}
-	if strings.Contains(normalizedHost, "byse") || strings.Contains(normalizedLink, "byse.sx/d/") {
+	// Handle both Byse download URLs (/d/) and embed URLs (/e/)
+	if strings.Contains(normalizedHost, "byse") || 
+	   strings.Contains(normalizedLink, "byse.sx/d/") || 
+	   strings.Contains(normalizedLink, "byse.sx/e/") ||
+	   strings.Contains(normalizedLink, "api.byse.sx/e/") {
 		if code := extractFileCode(link); code != "" {
 			return byseEmbedURL(code, byseAPIKey)
 		}
