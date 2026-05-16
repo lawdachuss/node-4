@@ -4,14 +4,14 @@
 
 ### Record multiple live streams automatically — locally, in Docker, or on GitHub Actions.
 
-[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-24%2F7%20Recorder-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](.github/workflows/recorder.yml)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](docker-compose.yml)
-[![Go](https://img.shields.io/badge/Go-1.23-00ADD8?style=for-the-badge&logo=go&logoColor=white)](go.mod)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-24%2F7%20Recorder-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/vasud3v/chaturbate-recorder/actions/workflows/recorder.yml)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/vasud3v/chaturbate-recorder/blob/main/docker-compose.yml)
+[![Go](https://img.shields.io/badge/Go-1.23-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://github.com/vasud3v/chaturbate-recorder/blob/main/go.mod)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](https://github.com/vasud3v/chaturbate-recorder/blob/main/LICENSE)
 
 **Actively maintained fork** of [teacat/chaturbate-dvr](https://github.com/teacat/chaturbate-dvr) with Cloudflare bypass, multi-host uploads, and cloud recording.
 
-[Features](#-features) · [Quick start](#-quick-start) · [GitHub Actions](#-github-actions-247-recorder) · [Docker](#-docker-full-stack) · [CLI](#-command-line-options) · [FAQ](#-faq)
+[Features](#features) · [Quick start](#quick-start) · [GitHub Actions](#github-actions-247-recorder) · [Docker](#docker-full-stack) · [CLI](#command-line-options) · [FAQ](#faq)
 
 If this project saves you time, consider giving it a **star** — it helps others find it.
 
@@ -22,8 +22,8 @@ If this project saves you time, consider giving it a **star** — it helps other
 > **Note:** The original [teacat/chaturbate-dvr](https://github.com/teacat/chaturbate-dvr) project is no longer maintained. This repository continues development with Docker, Byparr, uploads, and **GitHub Actions** support.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/d71f0aaa-e821-4371-9f48-658a137b42b6" alt="Dashboard — channel list and live status" width="48%" />
-  <img src="https://github.com/user-attachments/assets/43ab0a07-0ece-40ba-9a0f-045ca0316638" alt="Recording progress and logs" width="48%" />
+  <img src="docs/images/dashboard.png" alt="Dashboard — channel list and live status" width="48%" />
+  <img src="docs/images/recording.png" alt="Recording progress and logs" width="48%" />
 </p>
 
 ---
@@ -59,7 +59,7 @@ Open **[http://localhost:8080](http://localhost:8080)** and add channels. Config
 
 ### Option B — Pre-built binary (upstream style)
 
-Download a release from [teacat/chaturbate-dvr Releases](https://github.com/teacat/chaturbate-dvr/releases) or build from source:
+Download a release from [this repo’s Releases](https://github.com/vasud3v/chaturbate-recorder/releases) or [teacat/chaturbate-dvr Releases](https://github.com/teacat/chaturbate-dvr/releases), or build from source:
 
 ```bash
 go build -o chaturbate-dvr .
@@ -68,7 +68,7 @@ go build -o chaturbate-dvr .
 
 ### Option C — GitHub Actions (cloud recorder)
 
-No VPS required. See **[GitHub Actions 24/7 Recorder](#-github-actions-247-recorder)** below.
+No VPS required. See **[GitHub Actions 24/7 Recorder](#github-actions-247-recorder)** below.
 
 ---
 
@@ -107,7 +107,7 @@ flowchart LR
 6. Uploads an **emergency backup** artifact of any captured videos  
 7. Can **queue the next run** for continuous operation  
 
-Workflow file: [`.github/workflows/recorder.yml`](.github/workflows/recorder.yml)
+Workflow file: [`.github/workflows/recorder.yml`](https://github.com/vasud3v/chaturbate-recorder/blob/main/.github/workflows/recorder.yml)
 
 ### Setup (one time)
 
@@ -129,7 +129,7 @@ Workflow file: [`.github/workflows/recorder.yml`](.github/workflows/recorder.yml
    | `PROXY_USERNAME` | Optional | Proxy auth |
    | `PROXY_PASSWORD` | Optional | Proxy auth |
 
-3. Configure channels in **`conf/channels.json`** (commit to the repo):
+3. Configure channels in **[`conf/channels.json`](https://github.com/vasud3v/chaturbate-recorder/blob/main/conf/channels.json)** (commit to the repo):
 
    ```json
    [
@@ -172,7 +172,7 @@ docker compose logs -f chaturbate-dvr
 
 **Volumes:** `./videos` · `./conf` · `./database`
 
-Environment variables are loaded from `.env` (see [`.env.example`](.env.example)).
+Environment variables are loaded from `.env` (see [`.env.example`](https://github.com/vasud3v/chaturbate-recorder/blob/main/.env.example)).
 
 ---
 
@@ -189,7 +189,7 @@ Environment variables are loaded from `.env` (see [`.env.example`](.env.example)
 Visit **[http://localhost:8080](http://localhost:8080)**.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/cbd859a9-4255-404b-b6bf-fa89342f7258" alt="Cookies and User-Agent settings in the Web UI" width="720" />
+  <img src="docs/images/cookies.png" alt="Cookies and User-Agent settings in the Web UI" width="720" />
 </p>
 
 ---
@@ -250,7 +250,7 @@ videos/{{.Username}}_{{.Year}}-{{.Month}}-{{.Day}}_{{.Hour}}-{{.Minute}}-{{.Seco
 
 ### Automatic (Docker / GitHub Actions)
 
-Set `FLARESOLVERR_URL=http://byparr-lb/v1` (included in `docker-compose.yml`). The **cookie-refresher** service renews clearance via Byparr.
+Set `FLARESOLVERR_URL=http://byparr-lb/v1` (included in [`docker-compose.yml`](https://github.com/vasud3v/chaturbate-recorder/blob/main/docker-compose.yml)). The **cookie-refresher** service renews clearance via Byparr.
 
 ### Manual (local / CLI)
 
@@ -259,7 +259,7 @@ Set `FLARESOLVERR_URL=http://byparr-lb/v1` (included in `docker-compose.yml`). T
 3. Run with `-cookies` and `-user-agent` (from [whatismybrowser.com](https://www.whatismybrowser.com/detect/what-is-my-user-agent/)).
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/69f4061b-29a2-48a7-ad57-0c86148805e2" alt="Copy cf_clearance from browser DevTools" width="640" />
+  <img src="docs/images/cf-clearance.png" alt="Copy cf_clearance from browser DevTools" width="640" />
 </p>
 
 ### Record private shows
@@ -375,10 +375,11 @@ Use only for content you are **allowed** to record. You are responsible for comp
 ## Credits & license
 
 - Original project: [**teacat/chaturbate-dvr**](https://github.com/teacat/chaturbate-dvr) by TeaCat (MIT)  
+- Screenshots in `docs/images/` from the upstream project UI  
 - Cloudflare bypass: [**Byparr**](https://github.com/ThePhaseless/Byparr)  
-- UI favicon: [Twemoji](https://github.com/twitter/twemoji)  
+- UI favicon: [Twemoji](https://github.com/twemoji/twemoji) (Twitter’s Twemoji moved to [twemoji/twemoji](https://github.com/twemoji/twemoji))  
 
-Licensed under the [MIT License](LICENSE).
+Licensed under the [MIT License](https://github.com/vasud3v/chaturbate-recorder/blob/main/LICENSE).
 
 ---
 
