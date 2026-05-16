@@ -268,6 +268,7 @@ func FetchStreamViaFlareSolverr(ctx context.Context, username string) (string, s
 
 type streamAPIBody struct {
         HLSSource  string `json:"hls_source"`
+        URL        string `json:"url"`
         RoomStatus string `json:"room_status"`
 }
 
@@ -276,7 +277,12 @@ func parseStreamAPIBody(body string) (hlsURL, roomStatus string, err error) {
         if err := json.Unmarshal([]byte(body), &resp); err != nil {
                 return "", "", fmt.Errorf("parse stream API response: %w", err)
         }
-        return resp.HLSSource, resp.RoomStatus, nil
+        // The get_edge_hls_url_ajax endpoint returns the stream URL in "url" when "hls_source" is empty.
+        hlsURL = resp.HLSSource
+        if hlsURL == "" {
+                hlsURL = resp.URL
+        }
+        return hlsURL, resp.RoomStatus, nil
 }
 
 func fetchHLSSourceViaGET(ctx context.Context, username string) (hlsURL, roomStatus string, err error) {

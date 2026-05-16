@@ -33,10 +33,20 @@ var edgeRegionRegexp = regexp.MustCompile(`edge\d+-([a-z]+)`)
 // edgeRegions is the list of CDN edge regions to try when geo-blocked
 var edgeRegions = []string{"lax", "fra", "ams", "sin", "hnd"}
 
-// APIResponse represents the response from /api/chatvideocontext/ endpoint
+// APIResponse represents the response from /api/chatvideocontext/ and get_edge_hls_url_ajax/ endpoints.
+// The POST endpoint returns the stream URL in the "url" field; the GET endpoint uses "hls_source".
 type APIResponse struct {
         HLSSource  string `json:"hls_source"`
+        URL        string `json:"url"`
         RoomStatus string `json:"room_status"`
+}
+
+// StreamURL returns the HLS source URL, preferring hls_source and falling back to url.
+func (r *APIResponse) StreamURL() string {
+        if r.HLSSource != "" {
+                return r.HLSSource
+        }
+        return r.URL
 }
 
 // Client represents an API client for interacting with Chaturbate.
@@ -145,7 +155,7 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
                         return nil, resp.RoomStatus, internal.ErrChannelOffline
                 }
 
-                if resp.HLSSource == "" {
+                if resp.StreamURL() == "" {
                         if resp.RoomStatus == StatusPublic {
                                 stream, status, fsErr := tryFlareSolverrStream(ctx, username, "GET API returned public without HLS")
                                 if fsErr == nil {
@@ -161,7 +171,7 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
                 }
 
                 // Find working edge URL (geo-blocking fallback)
-                workingURL, err := findWorkingEdgeURL(ctx, client, resp.HLSSource)
+                workingURL, err := findWorkingEdgeURL(ctx, client, resp.StreamURL())
                 if err != nil {
                         return nil, resp.RoomStatus, err
                 }
@@ -185,9 +195,9 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
 
         // If POST API returned a public room but no HLS source, fall back to GET API.
         // This happens when Chaturbate requires cookies/auth for the POST endpoint.
-        if resp.HLSSource == "" {
+        if resp.StreamURL() == "" {
                 getResp, apiErr := fetchAPIResponse(ctx, client, username)
-                if apiErr == nil && getResp.HLSSource != "" {
+                if apiErr == nil && getResp.StreamURL() != "" {
                         resp = *getResp
                 } else {
                         roomStatus := resp.RoomStatus
@@ -219,7 +229,7 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
         }
 
         // Find working edge URL (geo-blocking fallback)
-        workingURL, err := findWorkingEdgeURL(ctx, client, resp.HLSSource)
+        workingURL, err := findWorkingEdgeURL(ctx, client, resp.StreamURL())
         if err != nil {
                 return nil, resp.RoomStatus, err
         }
