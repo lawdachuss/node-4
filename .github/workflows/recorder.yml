@@ -125,30 +125,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Start remaining services (recorder, uploader)
-          docker compose up -d --build chaturbate-dvr uploader
+          # Start remaining services (recorder, uploader, cookie-refresher)
+          docker compose up -d --build chaturbate-dvr uploader cookie-refresher
 
           echo "Running services:"
           docker compose ps
 
-          echo "Warming up Cloudflare cookie refresh (non-blocking)..."
-          wait_start_epoch="$(date +%s)"
+          echo "Waiting for cookie-refresher to push initial Cloudflare cookies..."
           cookies_ok=false
-          for attempt in {1..36}; do
-            logs="$(docker compose logs chaturbate-dvr 2>/dev/null)"
-            if echo "$logs" | grep -q 'refreshed and saved'; then
-              echo "Cloudflare cookies applied by background refresher"
+          for attempt in {1..90}; do
+            if docker compose logs cookie-refresher 2>/dev/null | grep -q 'Pushed to chaturbate-dvr (ok)'; then
+              echo "Cloudflare cookies applied by cookie-refresher"
               cookies_ok=true
               break
             fi
-            if echo "$logs" | grep -q 'FlareSolverr/Byparr obtained stream info'; then
-              echo "Cloudflare cookies obtained via channel recording fallback"
-              cookies_ok=true
-              break
-            fi
-            # Show brief progress every 12 attempts
-            if (( attempt % 12 == 1 )); then
-              echo "  [cookie wait ${attempt}s] still waiting for Cloudflare challenge..."
+            if docker compose logs cookie-refresher 2>/dev/null | grep -q 'Failed to push cookies'; then
+              echo "cookie-refresher retrying (attempt $attempt/90)..."
             fi
             sleep 5
           done

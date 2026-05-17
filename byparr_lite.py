@@ -43,8 +43,8 @@ def _launch_browser(p, max_timeout_ms: int):
     return p.chromium.launch(**launch_kwargs)
 
 
-def solve_cloudflare(url: str, max_timeout_ms: int = 180000) -> tuple:
-    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+def solve_cloudflare(url: str, max_timeout_ms: int = 120000) -> tuple:
+    from playwright.sync_api import sync_playwright
 
     deadline = time.time() + (max_timeout_ms / 1000)
     with CHROMIUM_LOCK:
@@ -59,12 +59,25 @@ def solve_cloudflare(url: str, max_timeout_ms: int = 180000) -> tuple:
             )
             page = context.new_page()
 
+            # Use wait_until="commit" so we get the HTTP response immediately
+            # even when Cloudflare blocks or shows a challenge page.
+            # domcontentloaded may never fire on blocked pages.
             try:
-                page.goto(url, timeout=max_timeout_ms, wait_until="domcontentloaded")
-            except PWTimeout:
-                pass
+                page.goto(url, timeout=max_timeout_ms, wait_until="commit")
             except Exception as e:
-                print(f"[byparr-lite] goto error (continuing): {e}", flush=True)
+                print(f"[byparr-lite] goto failed: {e}", flush=True)
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                return [], ""
+
+            page_title = ""
+            try:
+                page_title = page.title()
+            except Exception:
+                pass
+            print(f"[byparr-lite] Page loaded: url={url} title={page_title!r}", flush=True)
 
             # Poll for cf_clearance cookie (Cloudflare challenge completion)
             while time.time() < deadline:
@@ -72,17 +85,26 @@ def solve_cloudflare(url: str, max_timeout_ms: int = 180000) -> tuple:
                 if any(c["name"] == "cf_clearance" for c in cookies):
                     print("[byparr-lite] cf_clearance obtained", flush=True)
                     break
-                try:
-                    page.wait_for_timeout(2000)
-                except Exception:
-                    pass
+                time.sleep(2)
 
             all_cookies = context.cookies()
+            found = [c["name"] for c in all_cookies if c["name"] in ("cf_clearance", "csrftoken")]
+            if not found:
+                page_content = ""
+                try:
+                    page_content = page.content()[:500]
+                except Exception:
+                    pass
+                print(f"[byparr-lite] No cf_clearance after {max_timeout_ms}ms. Page begins: {page_content!r}", flush=True)
+
             try:
                 user_agent = page.evaluate("navigator.userAgent")
             except Exception:
                 user_agent = ""
-            browser.close()
+            try:
+                browser.close()
+            except Exception:
+                pass
 
     return all_cookies, user_agent
 

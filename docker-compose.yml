@@ -1,29 +1,32 @@
 ﻿services:
-  # Byparr - Scalable Cloudflare bypass service
+  # Byparr - Scalable Cloudflare bypass service (official image)
   byparr:
-    build:
-      context: .
-      dockerfile: Dockerfile.byparr
-    image: byparr-lite:latest
+    image: ghcr.io/thephaseless/byparr:latest
     environment:
+      - HOST=0.0.0.0
       - PORT=8191
+      - PROXY_SERVER=${PROXY_SERVER:-}
+      - PROXY_USERNAME=${PROXY_USERNAME:-}
+      - PROXY_PASSWORD=${PROXY_PASSWORD:-}
+      - TIMEOUT=300
+      - LOG_LEVEL=INFO
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8191/"]
       interval: 20s
       timeout: 8s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     networks:
       - recorder-network
     deploy:
       replicas: 2
       resources:
         limits:
-          memory: 1G
+          memory: 1.5G
         reservations:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '0.5'
+          memory: 500M
 
   # Nginx load balancer for Byparr instances
   byparr-lb:
@@ -86,6 +89,22 @@
         reservations:
           cpus: '0.2'
           memory: 200M
+
+  # Cookie Refresher - Auto refresh Cloudflare clearance via Byparr
+  cookie-refresher:
+    image: alpine:3
+    container_name: cookie-refresher
+    volumes:
+      - ./scripts/cookie-refresher.sh:/cookie-refresher.sh:ro
+    command: ["sh", "/cookie-refresher.sh"]
+    depends_on:
+      byparr:
+        condition: service_started
+      chaturbate-dvr:
+        condition: service_started
+    networks:
+      - recorder-network
+    restart: unless-stopped
 
   # Uploader - Automatically upload recordings to GoFile, Streamtape, VoeSX, SendCM
   uploader:
