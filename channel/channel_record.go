@@ -115,12 +115,10 @@ func (ch *Channel) RecordStream(ctx context.Context, client *chaturbate.Client) 
 		return fmt.Errorf("get playlist: %w", err)
 	}
 
-	// Capture room metadata for the recording entry
-	if info, err := client.GetRoomInfo(ctx, ch.Config.Username); err == nil {
-		ch.RoomTitle = info.RoomTitle
-		ch.Tags = info.Tags
-		ch.Viewers = info.NumUsers
-	}
+	// Capture room metadata cached on the client from GetStream.
+	ch.RoomTitle = client.LastRoomTitle
+	ch.Tags = client.LastTags
+	ch.Viewers = client.LastViewers
 
 	ch.StreamedAt = time.Now().Unix()
 	ch.Sequence = 0

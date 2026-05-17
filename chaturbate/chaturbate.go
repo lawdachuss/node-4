@@ -55,7 +55,10 @@ func (r *APIResponse) StreamURL() string {
 // Client represents an API client for interacting with Chaturbate.
 type Client struct {
 	Req            *internal.Req
-	LastRoomStatus string // cached from the most recent API call
+	LastRoomStatus string   // cached from the most recent API call
+	LastRoomTitle  string   // cached room metadata for recording entry
+	LastTags       []string // cached room metadata for recording entry
+	LastViewers    int      // cached room metadata for recording entry
 }
 
 // NewClient initializes and returns a new Client instance.
@@ -66,10 +69,15 @@ func NewClient() *Client {
 }
 
 // GetStream fetches the stream information for a given username.
-// The room status is cached in Client.LastRoomStatus.
+// Room metadata (title, tags, viewers) is cached on the Client for use
+// when building the recording entry.
 func (c *Client) GetStream(ctx context.Context, username string) (*Stream, error) {
-	stream, roomStatus, err := FetchStream(ctx, c.Req, username)
+	var roomInfo APIResponse
+	stream, roomStatus, err := FetchStream(ctx, c.Req, username, &roomInfo)
 	c.LastRoomStatus = roomStatus
+	c.LastRoomTitle = roomInfo.RoomTitle
+	c.LastTags = roomInfo.Tags
+	c.LastViewers = roomInfo.NumUsers
 	return stream, err
 }
 
@@ -80,11 +88,6 @@ func (c *Client) GetRoomStatus(ctx context.Context, username string) (string, er
 		return "", err
 	}
 	return resp.RoomStatus, nil
-}
-
-// GetRoomInfo returns the full room metadata (title, tags, viewers) from the API.
-func (c *Client) GetRoomInfo(ctx context.Context, username string) (*APIResponse, error) {
-	return fetchAPIResponse(ctx, c.Req, username)
 }
 
 func fetchAPIResponse(ctx context.Context, client *internal.Req, username string) (*APIResponse, error) {
@@ -104,15 +107,29 @@ func fetchAPIResponse(ctx context.Context, client *internal.Req, username string
 
 // tryFlareSolverrStream uses Byparr/FlareSolverr to obtain cookies and the HLS URL.
 // Used when Cloudflare blocks direct API access or when the room is live but no stream URL is returned.
-func tryFlareSolverrStream(ctx context.Context, username, reason string) (*Stream, string, error) {
+// If roomInfo is non-nil, it is populated with room metadata from the response.
+func tryFlareSolverrStream(ctx context.Context, username, reason string, roomInfo *APIResponse) (*Stream, string, error) {
 	fmt.Printf("[INFO] %s for %s, trying FlareSolverr/Byparr fallback...\n", reason, username)
 
 	attemptCtx, cancel := context.WithTimeout(ctx, 250*time.Second)
 	defer cancel()
 
-	hlsURL, status, scrapeErr := internal.FetchStreamViaFlareSolverr(attemptCtx, username)
+	var fsRoomInfo internal.StreamAPIBody
+	roomInfoPtr := &fsRoomInfo
+	if roomInfo == nil {
+		roomInfoPtr = nil
+	}
+
+	hlsURL, status, scrapeErr := internal.FetchStreamViaFlareSolverr(attemptCtx, username, roomInfoPtr)
 	if scrapeErr != nil {
 		return nil, "", scrapeErr
+	}
+
+	// Copy metadata from the internal struct to the caller's APIResponse.
+	if roomInfo != nil && roomInfoPtr != nil {
+		roomInfo.RoomTitle = roomInfoPtr.RoomTitle
+		roomInfo.Tags = roomInfoPtr.Tags
+		roomInfo.NumUsers = roomInfoPtr.NumUsers
 	}
 
 	fmt.Printf("[SUCCESS] FlareSolverr/Byparr obtained stream info for %s\n", username)
@@ -129,7 +146,9 @@ func tryFlareSolverrStream(ctx context.Context, username, reason string) (*Strea
 
 // FetchStream retrieves the streaming data using the Chaturbate API.
 // Returns the stream, the room status string, and any error.
-func FetchStream(ctx context.Context, client *internal.Req, username string) (*Stream, string, error) {
+// If roomInfo is non-nil, it is populated with room metadata (title, tags,
+// viewers) from whichever API call succeeded.
+func FetchStream(ctx context.Context, client *internal.Req, username string, roomInfo *APIResponse) (*Stream, string, error) {
 	// Try POST API first (faster, doesn't require FlareSolverr)
 	csrfToken := fmt.Sprintf("%016x%016x", time.Now().UnixNano(), time.Now().UnixNano()^0xDEADBEEF)
 
@@ -137,7 +156,7 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
 	if err != nil {
 		// If Cloudflare blocked us, try FlareSolverr as fallback
 		if errors.Is(err, internal.ErrCloudflareBlocked) {
-			stream, status, fsErr := tryFlareSolverrStream(ctx, username, "Cloudflare blocked POST API")
+			stream, status, fsErr := tryFlareSolverrStream(ctx, username, "Cloudflare blocked POST API", roomInfo)
 			if fsErr == nil {
 				workingURL, edgeErr := findWorkingEdgeURL(ctx, client, stream.HLSSource)
 				if edgeErr != nil {
@@ -155,6 +174,13 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
 			return nil, "", apiErr
 		}
 
+		// Cache room metadata from GET API
+		if roomInfo != nil {
+			roomInfo.RoomTitle = resp.RoomTitle
+			roomInfo.Tags = resp.Tags
+			roomInfo.NumUsers = resp.NumUsers
+		}
+
 		// Handle room status from GET API
 		switch resp.RoomStatus {
 		case StatusPrivate:
@@ -165,7 +191,7 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
 
 		if resp.StreamURL() == "" {
 			if resp.RoomStatus == StatusPublic {
-				stream, status, fsErr := tryFlareSolverrStream(ctx, username, "GET API returned public without HLS")
+				stream, status, fsErr := tryFlareSolverrStream(ctx, username, "GET API returned public without HLS", roomInfo)
 				if fsErr == nil {
 					workingURL, edgeErr := findWorkingEdgeURL(ctx, client, stream.HLSSource)
 					if edgeErr != nil {
@@ -193,6 +219,13 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
 		return nil, "", fmt.Errorf("failed to parse POST API response: %w", err)
 	}
 
+	// Cache room metadata from POST API
+	if roomInfo != nil {
+		roomInfo.RoomTitle = resp.RoomTitle
+		roomInfo.Tags = resp.Tags
+		roomInfo.NumUsers = resp.NumUsers
+	}
+
 	// Handle room status
 	switch resp.RoomStatus {
 	case StatusPrivate:
@@ -207,6 +240,11 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
 		getResp, apiErr := fetchAPIResponse(ctx, client, username)
 		if apiErr == nil && getResp.StreamURL() != "" {
 			resp = *getResp
+			if roomInfo != nil {
+				roomInfo.RoomTitle = getResp.RoomTitle
+				roomInfo.Tags = getResp.Tags
+				roomInfo.NumUsers = getResp.NumUsers
+			}
 		} else {
 			roomStatus := resp.RoomStatus
 			if apiErr == nil {
@@ -214,7 +252,7 @@ func FetchStream(ctx context.Context, client *internal.Req, username string) (*S
 			}
 			// Room may show as public while HLS is withheld (common on datacenter IPs / without cookies).
 			if roomStatus == StatusPublic || resp.RoomStatus == StatusPublic {
-				stream, status, fsErr := tryFlareSolverrStream(ctx, username, "live room but no HLS URL from API")
+				stream, status, fsErr := tryFlareSolverrStream(ctx, username, "live room but no HLS URL from API", roomInfo)
 				if fsErr == nil {
 					workingURL, edgeErr := findWorkingEdgeURL(ctx, client, stream.HLSSource)
 					if edgeErr != nil {

@@ -241,7 +241,8 @@ func GetFreshCookiesViaFlareSolverr(ctx context.Context, url string) (string, st
 }
 
 // FetchStreamViaFlareSolverr uses FlareSolverr to get the HLS stream URL when Cloudflare blocks direct access
-func FetchStreamViaFlareSolverr(ctx context.Context, username string) (string, string, error) {
+// If roomInfo is non-nil, it is populated with room metadata (title, tags, viewers).
+func FetchStreamViaFlareSolverr(ctx context.Context, username string, roomInfo *StreamAPIBody) (string, string, error) {
 	flaresolverrURL := getFlareSolverrURL()
 	if flaresolverrURL == "" {
 		return "", "", fmt.Errorf("FLARESOLVERR_URL not configured")
@@ -277,9 +278,14 @@ func FetchStreamViaFlareSolverr(ctx context.Context, username string) (string, s
 		return "", "", fmt.Errorf("post api after byparr: %w", err)
 	}
 
-	hlsURL, roomStatus, err := parseStreamAPIBody(body)
+	hlsURL, roomStatus, apiBody, err := parseStreamAPIBody(body)
 	if err != nil {
 		return "", "", err
+	}
+	if roomInfo != nil && apiBody != nil {
+		roomInfo.RoomTitle = apiBody.RoomTitle
+		roomInfo.Tags = apiBody.Tags
+		roomInfo.NumUsers = apiBody.NumUsers
 	}
 
 	if hlsURL != "" {
@@ -288,8 +294,13 @@ func FetchStreamViaFlareSolverr(ctx context.Context, username string) (string, s
 
 	// Step 4: POST may return public with empty hls_source; try GET chatvideocontext.
 	if roomStatus == "public" {
-		if hlsURL, roomStatus, err = fetchHLSSourceViaGET(ctx, username); err != nil {
+		if hlsURL, roomStatus, apiBody, err = fetchHLSSourceViaGET(ctx, username); err != nil {
 			return "", "", err
+		}
+		if roomInfo != nil && apiBody != nil {
+			roomInfo.RoomTitle = apiBody.RoomTitle
+			roomInfo.Tags = apiBody.Tags
+			roomInfo.NumUsers = apiBody.NumUsers
 		}
 		if hlsURL != "" {
 			return hlsURL, roomStatus, nil
@@ -302,7 +313,9 @@ func FetchStreamViaFlareSolverr(ctx context.Context, username string) (string, s
 	return "", roomStatus, fmt.Errorf("no hls_source after byparr bypass (room_status=%s)", roomStatus)
 }
 
-type streamAPIBody struct {
+// StreamAPIBody mirrors chaturbate.APIResponse for use within the internal
+// package. The matching field layout allows direct Go struct conversion.
+type StreamAPIBody struct {
 	HLSSource  string   `json:"hls_source"`
 	URL        string   `json:"url"`
 	RoomStatus string   `json:"room_status"`
@@ -311,28 +324,28 @@ type streamAPIBody struct {
 	NumUsers   int      `json:"num_users"`
 }
 
-func parseStreamAPIBody(body string) (hlsURL, roomStatus string, err error) {
-	var resp streamAPIBody
+func parseStreamAPIBody(body string) (hlsURL, roomStatus string, apiBody *StreamAPIBody, err error) {
+	var resp StreamAPIBody
 	if err := json.Unmarshal([]byte(body), &resp); err != nil {
-		return "", "", fmt.Errorf("parse stream API response: %w", err)
+		return "", "", nil, fmt.Errorf("parse stream API response: %w", err)
 	}
 	// The get_edge_hls_url_ajax endpoint returns the stream URL in "url" when "hls_source" is empty.
 	hlsURL = resp.HLSSource
 	if hlsURL == "" {
 		hlsURL = resp.URL
 	}
-	return hlsURL, resp.RoomStatus, nil
+	return hlsURL, resp.RoomStatus, &resp, nil
 }
 
-func fetchHLSSourceViaGET(ctx context.Context, username string) (hlsURL, roomStatus string, err error) {
+func fetchHLSSourceViaGET(ctx context.Context, username string) (hlsURL, roomStatus string, apiBody *StreamAPIBody, err error) {
 	apiURL := fmt.Sprintf("%sapi/chatvideocontext/%s/", server.Config.Domain, username)
 	body, err := NewReq().Get(ctx, apiURL)
 	if err != nil {
-		return "", "", fmt.Errorf("get chatvideocontext: %w", err)
+		return "", "", nil, fmt.Errorf("get chatvideocontext: %w", err)
 	}
-	var resp streamAPIBody
+	var resp StreamAPIBody
 	if err := json.Unmarshal([]byte(body), &resp); err != nil {
-		return "", "", fmt.Errorf("parse chatvideocontext: %w", err)
+		return "", "", nil, fmt.Errorf("parse chatvideocontext: %w", err)
 	}
-	return resp.HLSSource, resp.RoomStatus, nil
+	return resp.HLSSource, resp.RoomStatus, &resp, nil
 }

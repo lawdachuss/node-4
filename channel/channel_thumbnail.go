@@ -159,7 +159,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					info("thumb: ffmpeg output: %s", msg)
 				}
 			} else if _, e := os.Stat(spriteJPG); e == nil {
-				imgUploader := uploader.NewMultiImageUploader()
+				imgUploader := uploader.NewSpriteUploader()
 				if remoteURL, _, uploadErr := imgUploader.Upload(spriteJPG); uploadErr == nil {
 					if writeErr := os.WriteFile(spriteSidecar, []byte(remoteURL), 0644); writeErr == nil {
 						info("thumb: uploaded sprite for %s to remote host", baseName)

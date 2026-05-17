@@ -27,6 +27,21 @@ func NewMultiImageUploader() *MultiImageUploader {
 	}
 }
 
+// NewSpriteUploader creates an upload chain that prefers Catbox (file host, no
+// recompression) over Pixhost (image host, may downscale wide sprites).
+func NewSpriteUploader() *MultiImageUploader {
+	catbox := NewCatboxUploader()
+	pixhost := NewThumbnailUploader("")
+	freeimage := NewFreeimageUploader()
+	return &MultiImageUploader{
+		hosts: []imageHost{
+			{name: "Catbox", upload: catbox.Upload},
+			{name: "Pixhost", upload: pixhost.Upload},
+			{name: "Freeimage", upload: freeimage.Upload},
+		},
+	}
+}
+
 // Upload tries each host in order until one succeeds.
 func (m *MultiImageUploader) Upload(filePath string) (url, host string, err error) {
 	var lastErr error
