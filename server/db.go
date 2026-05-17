@@ -420,3 +420,33 @@ func LoadRecordingsFromDB() []byte {
 	b, _ := json.Marshal(db)
 	return b
 }
+
+// ─── Tunnels ──────────────────────────────────────────────────────────────────
+
+type supabaseTunnel struct {
+	URL   string `json:"url"`
+	RunID int    `json:"run_id"`
+}
+
+func SaveTunnelToDB(url string, runID int) error {
+	if supabaseClient == nil {
+		return nil
+	}
+	row := supabaseTunnel{URL: url, RunID: runID}
+	return supabaseClient.upsert("tunnel_sessions", row)
+}
+
+func LoadCurrentTunnel() (string, error) {
+	if supabaseClient == nil {
+		return "", nil
+	}
+	data, err := supabaseClient.get("tunnel_sessions", "select=url,run_id&order=run_id.desc&limit=1")
+	if err != nil {
+		return "", err
+	}
+	var rows []supabaseTunnel
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return "", nil
+	}
+	return rows[0].URL, nil
+}

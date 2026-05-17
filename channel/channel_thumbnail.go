@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/teacat/chaturbate-dvr/server"
 	"github.com/teacat/chaturbate-dvr/uploader"
 )
 
@@ -49,8 +50,6 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 	thumbSidecar := videoPath + ".thumb"
 	thumbJPG := videoPath + ".thumb.jpg"
 	if _, err := os.Stat(thumbSidecar); os.IsNotExist(err) {
-	"github.com/teacat/chaturbate-dvr/server"
-	"github.com/teacat/chaturbate-dvr/uploader"
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		err := exec.CommandContext(ctx, "ffmpeg",
 			"-y", "-i", videoPath,
@@ -111,6 +110,11 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					errFn("thumb: could not write sidecar for %s: %v", baseName, writeErr)
 				}
 			}
+		}
+	}
+
+	spriteSidecar := videoPath + ".sprite"
+	spriteJPG := videoPath + ".sprite.jpg"
 	if _, err := os.Stat(spriteSidecar); os.IsNotExist(err) {
 		duration := 30.0
 		probeCtx, probeCancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -170,6 +174,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 			)
 
 			tileCtx, tileCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer tileCancel()
 			if out, e := exec.CommandContext(tileCtx, "ffmpeg", args...).CombinedOutput(); e != nil {
 				info("thumb: sprite tile failed for %s: %v", baseName, e)
 				if len(out) > 0 {
@@ -221,5 +226,8 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					} else {
 						errFn("thumb: could not write sprite sidecar for %s: %v", baseName, writeErr)
 					}
+				}
+			}
+		}
 	}
 }

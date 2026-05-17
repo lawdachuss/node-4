@@ -11,8 +11,17 @@ import (
 	"time"
 
 	"github.com/teacat/chaturbate-dvr/server"
-        "github.com/teacat/chaturbate-dvr/uploader"
-	
+)
+
+type Pattern struct {
+	Username string
+	Sequence int
+	Year     string
+	Month    string
+	Day      string
+	Hour     string
+	Minute   string
+	Second   string
 }
 
 // NextFile prepares the next file to be created, by cleaning up the last file and generating a new one
