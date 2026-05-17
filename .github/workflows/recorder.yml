@@ -125,6 +125,21 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Ensure byparr-lb is healthy before starting dependent services
+          for attempt in {1..30}; do
+            if curl -fsS --max-time 3 http://localhost:8191/backend-health >/dev/null; then
+              echo "Byparr load balancer is healthy"
+              break
+            fi
+            if (( attempt == 30 )); then
+              echo "Byparr load balancer did not become healthy"
+              docker compose ps
+              docker compose logs --tail=20 byparr-lb || true
+              exit 1
+            fi
+            sleep 2
+          done
+
           # Start remaining services (recorder, uploader, cookie-refresher)
           docker compose up -d --build chaturbate-dvr uploader cookie-refresher
 

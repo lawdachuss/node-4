@@ -100,6 +100,8 @@
     depends_on:
       byparr:
         condition: service_started
+      byparr-lb:
+        condition: service_started
       chaturbate-dvr:
         condition: service_started
     networks:
