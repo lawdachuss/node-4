@@ -98,7 +98,7 @@ func embedURLFromLink(host, link string) string {
 // It uses the channel's logging so upload events appear in the UI logs.
 // GoFile always uploads (no API key needed).
 // Other services upload only if their API key is configured.
-func (ch *Channel) uploadFile(filePath string) bool {
+func (ch *Channel) uploadFile(filePath string, thumbURL, spriteURL string) bool {
 	cfg := server.Config
 	if cfg == nil {
 		return false
@@ -127,9 +127,20 @@ func (ch *Channel) uploadFile(filePath string) bool {
 		}
 	}
 
+	// Always save preview links to Supabase first — even if video upload fails,
+	// the preview images were already uploaded to image hosts.
+	if thumbURL != "" || spriteURL != "" {
+		if err := server.SavePreviewLinks(filename, thumbURL, spriteURL); err != nil {
+			ch.Error("upload: could not save preview links for %s: %v", filename, err)
+		} else {
+			ch.Info("upload: saved preview links for %s", filename)
+		}
+	}
+
 	// Persist successful upload results to recordings database
 	successful := uploader.GetSuccessfulUploads(results)
 	if len(successful) > 0 {
+		dbSaved := false
 		links := map[string]string{}
 		var embedURL string
 		for _, r := range successful {
@@ -145,15 +156,31 @@ func (ch *Channel) uploadFile(filePath string) bool {
 			filesize = stat.Size()
 		}
 
-		thumbURL := ""
-		if d, e := os.ReadFile(filePath + ".thumb"); e == nil {
-			thumbURL = strings.TrimSpace(string(d))
-		}
-		spriteURL := ""
-		if d, e := os.ReadFile(filePath + ".sprite"); e == nil {
-			spriteURL = strings.TrimSpace(string(d))
+		// Save directly to Supabase
+		timestamp := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+		if err := server.SaveRecordingWithLinks(
+			ch.Config.Username,
+			filename,
+			timestamp,
+			ch.RoomTitle,
+			ch.Tags,
+			ch.Viewers,
+			ch.Resolution,
+			ch.Framerate,
+			filesize,
+			"", // gender - will be set later if needed
+			thumbURL,
+			spriteURL,
+			embedURL,
+			links,
+		); err != nil {
+			ch.Error("upload: failed to save to Supabase: %v", err)
+		} else {
+			dbSaved = true
+			ch.Info("upload: saved recording metadata to Supabase for %s", filename)
 		}
 
+		// Also save to JSON-based database for backward compatibility
 		server.RecMu.Lock()
 		db := loadRecDB()
 		username := ch.Config.Username
@@ -186,7 +213,7 @@ func (ch *Channel) uploadFile(filePath string) bool {
 		if !found {
 			entry := recEntry{
 				Filename:     filename,
-				Timestamp:    time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+				Timestamp:    timestamp,
 				RoomTitle:    ch.RoomTitle,
 				Tags:         ch.Tags,
 				Viewers:      ch.Viewers,
@@ -202,31 +229,13 @@ func (ch *Channel) uploadFile(filePath string) bool {
 		}
 		saveRecDB(db)
 		server.RecMu.Unlock()
-		ch.Info("upload: saved upload links to database for %s", filename)
+		ch.Info("upload: saved upload links to JSON database for %s", filename)
 
-		// Save preview links to dedicated table for fast lookup
-		if thumbURL != "" || spriteURL != "" {
-			if err := server.SavePreviewLinks(filename, thumbURL, spriteURL); err != nil {
-				ch.Error("upload: could not save preview links for %s: %v", filename, err)
-			} else {
-				ch.Info("upload: saved preview links for %s", filename)
-			}
-		}
-
-		// If configured to delete local files after upload, remove
-		// the video and any generated sidecars (thumbnails/sprites).
-		// Only delete if we successfully saved the URLs to the database.
-		if server.Config != nil && server.Config.DeleteLocalAfterUpload {
-			if thumbURL == "" && spriteURL == "" {
-				ch.Error("upload: skipping local file deletion for %s — no preview URLs were saved to database", filename)
-			} else {
-				_ = os.Remove(filePath)
-				_ = os.Remove(filePath + ".thumb.jpg")
-				_ = os.Remove(filePath + ".sprite.jpg")
-				_ = os.Remove(filePath + ".thumb")
-				_ = os.Remove(filePath + ".sprite")
-				ch.Info("upload: removed local files for %s", filename)
-			}
+		// Only delete local file if at least one DB write succeeded — prevents
+		// losing the file when Supabase is down or returns an error.
+		if server.Config != nil && server.Config.DeleteLocalAfterUpload && dbSaved {
+			_ = os.Remove(filePath)
+			ch.Info("upload: removed local file for %s", filename)
 		}
 	}
 

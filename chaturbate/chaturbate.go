@@ -108,40 +108,59 @@ func fetchAPIResponse(ctx context.Context, client *internal.Req, username string
 // tryFlareSolverrStream uses Byparr/FlareSolverr to obtain cookies and the HLS URL.
 // Used when Cloudflare blocks direct API access or when the room is live but no stream URL is returned.
 // If roomInfo is non-nil, it is populated with room metadata from the response.
+// Retries up to 3 times with a shared 250s timeout budget to handle transient Byparr failures.
 func tryFlareSolverrStream(ctx context.Context, username, reason string, roomInfo *APIResponse) (*Stream, string, error) {
-        fmt.Printf("[INFO] %s for %s, trying FlareSolverr/Byparr fallback...\n", reason, username)
+	fmt.Printf("[INFO] %s for %s, trying FlareSolverr/Byparr fallback...\n", reason, username)
 
-        attemptCtx, cancel := context.WithTimeout(ctx, 250*time.Second)
-        defer cancel()
+	deadline, hasDeadline := ctx.Deadline()
+	var budget time.Duration
+	if hasDeadline {
+		budget = time.Until(deadline)
+	}
+	if budget <= 0 || budget > 250*time.Second {
+		budget = 250 * time.Second
+	}
 
-        var fsRoomInfo internal.StreamAPIBody
-        roomInfoPtr := &fsRoomInfo
-        if roomInfo == nil {
-                roomInfoPtr = nil
-        }
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := range maxAttempts {
+		perAttempt := budget / time.Duration(maxAttempts-attempt)
+		attemptCtx, cancel := context.WithTimeout(ctx, perAttempt)
 
-        hlsURL, status, scrapeErr := internal.FetchStreamViaFlareSolverr(attemptCtx, username, roomInfoPtr)
-        if scrapeErr != nil {
-                return nil, "", scrapeErr
-        }
+		var fsRoomInfo internal.StreamAPIBody
+		roomInfoPtr := &fsRoomInfo
+		if roomInfo == nil {
+			roomInfoPtr = nil
+		}
 
-        // Copy metadata from the internal struct to the caller's APIResponse.
-        if roomInfo != nil && roomInfoPtr != nil {
-                roomInfo.RoomTitle = roomInfoPtr.RoomTitle
-                roomInfo.Tags = roomInfoPtr.Tags
-                roomInfo.NumUsers = roomInfoPtr.NumUsers
-        }
-
-        fmt.Printf("[SUCCESS] FlareSolverr/Byparr obtained stream info for %s\n", username)
-
-        if status == "private" {
-                return nil, status, internal.ErrPrivateStream
-        }
-        if status == "offline" || hlsURL == "" {
-                return nil, status, internal.ErrChannelOffline
-        }
-
-        return &Stream{HLSSource: hlsURL}, status, nil
+		hlsURL, status, err := internal.FetchStreamViaFlareSolverr(attemptCtx, username, roomInfoPtr)
+		cancel()
+		if err == nil {
+			if roomInfo != nil && roomInfoPtr != nil {
+				roomInfo.RoomTitle = roomInfoPtr.RoomTitle
+				roomInfo.Tags = roomInfoPtr.Tags
+				roomInfo.NumUsers = roomInfoPtr.NumUsers
+			}
+			fmt.Printf("[SUCCESS] FlareSolverr/Byparr obtained stream info for %s\n", username)
+			if status == "private" {
+				return nil, status, internal.ErrPrivateStream
+			}
+			if status == "offline" || hlsURL == "" {
+				return nil, status, internal.ErrChannelOffline
+			}
+			return &Stream{HLSSource: hlsURL}, status, nil
+		}
+		lastErr = err
+		if attempt < maxAttempts-1 {
+			fmt.Printf("[WARN] FlareSolverr attempt %d/%d for %s failed: %v\n", attempt+1, maxAttempts, username, err)
+			select {
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			case <-time.After(3 * time.Second):
+			}
+		}
+	}
+	return nil, "", lastErr
 }
 
 // FetchStream retrieves the streaming data using the Chaturbate API.

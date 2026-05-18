@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/teacat/chaturbate-dvr/server"
@@ -26,7 +27,7 @@ type Pattern struct {
 
 // NextFile prepares the next file to be created, by cleaning up the last file and generating a new one
 func (ch *Channel) NextFile() error {
-	if err := ch.Cleanup(); err != nil {
+	if err := ch.Cleanup(true); err != nil {
 		return err
 	}
 	filename, err := ch.GenerateFilename()
@@ -43,95 +44,151 @@ func (ch *Channel) NextFile() error {
 	return nil
 }
 
-// Cleanup cleans the file and resets it, called when the stream errors out or before next file was created.
-func (ch *Channel) Cleanup() error {
+// Cleanup closes any open recording files and either queues them for later
+// post-processing (isRotation=true, during file rotation) or processes the
+// entire pending queue (isRotation=false, when the session ends).
+func (ch *Channel) Cleanup(isRotation bool) error {
 	ch.cleanupMu.Lock()
 	defer ch.cleanupMu.Unlock()
 
-	if ch.File == nil && ch.AudioFile == nil {
+	if ch.File == nil && ch.AudioFile == nil && len(ch.pendingFiles) == 0 {
 		return nil
 	}
-	currentFilename := ch.CurrentFilename
 
-	defer func() {
+	// Close any open files and add them to the pending queue.
+	if ch.File != nil || ch.AudioFile != nil {
+		videoPath, videoInfo, err := closeTrackedFile(ch.File)
+		if err != nil {
+			return err
+		}
+		audioPath, audioInfo, err := closeTrackedFile(ch.AudioFile)
+		if err != nil {
+			return err
+		}
+
 		ch.File = nil
 		ch.AudioFile = nil
 		ch.CurrentFilename = ""
 		ch.Filesize = 0
 		ch.Duration = 0
-	}()
 
-	videoFilename, videoInfo, err := closeTrackedFile(ch.File)
-	if err != nil {
-		return err
-	}
-	audioFilename, audioInfo, err := closeTrackedFile(ch.AudioFile)
-	if err != nil {
-		return err
-	}
-
-	if ch.HasSeparateAudio {
-		switch {
-		case videoInfo == nil && audioInfo == nil:
-			return nil
-		case videoInfo == nil:
-			ch.Info("mux: video track missing; preserving audio-only file %s", filepath.Base(audioFilename))
-			if ch.Config.Compress {
-				ch.CompressFile(audioFilename)
-			} else {
-				ch.MoveToOutputDir(audioFilename)
+		// Skip empty files (both tracks zero/missing).
+		if ch.HasSeparateAudio {
+			if videoInfo == nil && audioInfo == nil {
+				if !isRotation {
+					ch.processPendingQueue()
+				}
+				return nil
 			}
-			return nil
-		case audioInfo == nil:
-			ch.Info("mux: audio track missing; preserving video-only file %s", filepath.Base(videoFilename))
-			if ch.Config.Compress {
-				ch.CompressFile(videoFilename)
-			} else {
-				ch.MoveToOutputDir(videoFilename)
-			}
-			return nil
-		}
-
-		finalOutput := currentFilename + ".mp4"
-		if err := ch.MuxAV(videoFilename, audioFilename, finalOutput); err != nil {
-			ch.Info("mux: ffmpeg mux failed, trying native fallback: %s", err.Error())
-			if nativeErr := ch.MuxAVNative(videoFilename, audioFilename, finalOutput); nativeErr != nil {
-				return fmt.Errorf("mux audio/video: %w", nativeErr)
-			}
-		}
-
-		// Sanity-check the muxed file before discarding the sidecars. If the
-		// output is missing or implausibly small, keep the sidecars so the
-		// user can recover manually (or rerun mux with external tools).
-		if ok, reason := muxOutputLooksValid(finalOutput, videoInfo, audioInfo); !ok {
-			ch.Error("mux: output looks corrupt (%s); keeping sidecars %s and %s", reason, filepath.Base(videoFilename), filepath.Base(audioFilename))
-			ch.Info("delete: removed corrupt mux output %s", filepath.Base(finalOutput))
-			_ = os.Remove(finalOutput)
-			return nil
-		}
-
-		ch.Info("delete: removed sidecar %s", filepath.Base(videoFilename))
-		ch.Info("delete: removed sidecar %s", filepath.Base(audioFilename))
-		_ = os.Remove(videoFilename)
-		_ = os.Remove(audioFilename)
-
-		if ch.Config.Compress {
-			ch.CompressFile(finalOutput)
 		} else {
-			ch.MoveToOutputDir(finalOutput)
+			if videoInfo == nil || videoInfo.Size() == 0 {
+				if !isRotation {
+					ch.processPendingQueue()
+				}
+				return nil
+			}
 		}
+
+		ch.pendingFiles = append(ch.pendingFiles, pendingFile{
+			videoPath: videoPath,
+			audioPath: audioPath,
+		})
+		ch.Info("cleanup: queued %s for post-processing (%d pending)", filepath.Base(videoPath), len(ch.pendingFiles))
+	}
+
+	if isRotation {
 		return nil
 	}
 
-	if videoInfo != nil && videoInfo.Size() > 0 {
+	ch.processPendingQueue()
+	return nil
+}
+
+// processPendingQueue processes all pending files: mux A/V if needed, move to
+// output dir, generate previews, upload, save metadata, and delete local files.
+// Must be called with cleanupMu held.
+func (ch *Channel) processPendingQueue() {
+	if len(ch.pendingFiles) == 0 {
+		return
+	}
+	ch.Info("cleanup: processing %d pending file(s)", len(ch.pendingFiles))
+
+	for _, pf := range ch.pendingFiles {
+		ch.processPendingFile(pf)
+	}
+	ch.pendingFiles = nil
+}
+
+func (ch *Channel) processPendingFile(pf pendingFile) {
+	videoPath := pf.videoPath
+	audioPath := pf.audioPath
+
+	if ch.HasSeparateAudio && audioPath != "" {
+		ch.processPendingMuxPair(videoPath, audioPath)
+		return
+	}
+
+	// Single-stream file — move to output dir (triggers preview + upload).
+	if _, err := os.Stat(videoPath); err == nil {
 		if ch.Config.Compress {
-			ch.CompressFile(videoFilename)
+			ch.CompressFile(videoPath)
 		} else {
-			ch.MoveToOutputDir(videoFilename)
+			ch.MoveToOutputDir(videoPath)
+		}
+	}
+}
+
+func (ch *Channel) processPendingMuxPair(videoPath, audioPath string) {
+	videoInfo, _ := os.Stat(videoPath)
+	audioInfo, _ := os.Stat(audioPath)
+
+	switch {
+	case videoInfo == nil && audioInfo == nil:
+		return
+	case videoInfo == nil:
+		ch.Info("mux: video track missing; preserving audio-only file %s", filepath.Base(audioPath))
+		if ch.Config.Compress {
+			ch.CompressFile(audioPath)
+		} else {
+			ch.MoveToOutputDir(audioPath)
+		}
+		return
+	case audioInfo == nil:
+		ch.Info("mux: audio track missing; preserving video-only file %s", filepath.Base(videoPath))
+		if ch.Config.Compress {
+			ch.CompressFile(videoPath)
+		} else {
+			ch.MoveToOutputDir(videoPath)
+		}
+		return
+	}
+
+	// Both tracks exist — mux them together.
+	finalOutput := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".muxed.mp4"
+	if err := ch.MuxAV(videoPath, audioPath, finalOutput); err != nil {
+		ch.Info("mux: ffmpeg mux failed, trying native fallback: %s", err.Error())
+		if nativeErr := ch.MuxAVNative(videoPath, audioPath, finalOutput); nativeErr != nil {
+			ch.Error("mux failed for %s: %v", filepath.Base(videoPath), nativeErr)
+			return
 		}
 	}
 
-	return nil
+	if ok, reason := muxOutputLooksValid(finalOutput, videoInfo, audioInfo); !ok {
+		ch.Error("mux: output looks corrupt (%s); keeping sidecars %s and %s", reason, filepath.Base(videoPath), filepath.Base(audioPath))
+		_ = os.Remove(finalOutput)
+		return
+	}
+
+	_ = os.Remove(videoPath)
+	_ = os.Remove(audioPath)
+	ch.Info("delete: removed sidecar %s", filepath.Base(videoPath))
+	ch.Info("delete: removed sidecar %s", filepath.Base(audioPath))
+
+	if ch.Config.Compress {
+		ch.CompressFile(finalOutput)
+	} else {
+		ch.MoveToOutputDir(finalOutput)
+	}
 }
 
 // muxOutputLooksValid returns true if the muxed MP4 appears to contain most
@@ -161,7 +218,11 @@ func muxOutputLooksValid(outputPath string, videoInfo, audioInfo os.FileInfo) (b
 // Errors are non-fatal: the recording is already safely written at srcPath.
 func (ch *Channel) MoveToOutputDir(srcPath string) string {
 	if server.Config == nil || server.Config.OutputDir == "" {
-		go ch.generatePreviewAndUpload(srcPath)
+		ch.UploadWg.Add(1)
+		go func() {
+			defer ch.UploadWg.Done()
+			ch.generatePreviewAndUpload(srcPath)
+		}()
 		return srcPath
 	}
 
@@ -180,13 +241,17 @@ func (ch *Channel) MoveToOutputDir(srcPath string) string {
 		return srcPath
 	}
 	ch.Info("output-dir: moved %s -> %s", filepath.Base(srcPath), destPath)
-	go ch.generatePreviewAndUpload(destPath)
+	ch.UploadWg.Add(1)
+	go func() {
+		defer ch.UploadWg.Done()
+		ch.generatePreviewAndUpload(destPath)
+	}()
 	return destPath
 }
 
 func (ch *Channel) generatePreviewAndUpload(filePath string) {
-	ch.generateThumbnail(filePath)
-	ch.uploadFile(filePath)
+	thumbURL, spriteURL := ch.generateThumbnail(filePath)
+	ch.uploadFile(filePath, thumbURL, spriteURL)
 }
 
 // uniqueDestPath returns path if it does not exist, otherwise appends

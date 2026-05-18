@@ -157,8 +157,8 @@ jobs:
             sleep 4
           done
 
-          echo "Starting chaturbate-dvr and uploader..."
-          docker compose up -d --build chaturbate-dvr uploader
+          echo "Starting chaturbate-dvr..."
+          docker compose up -d --build chaturbate-dvr
 
           echo "=== Full container status ==="
           docker compose ps -a

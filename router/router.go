@@ -58,8 +58,6 @@ func SetupViews(r *gin.Engine) {
         r.GET("/channel", ChannelVideos)
         r.GET("/play", Play)
         r.GET("/download", Download)
-        r.GET("/thumb", ServeThumb)
-        r.GET("/sprite", ServeSprite)
         r.POST("/delete_video", DeleteVideo)
         r.POST("/update_config", UpdateConfig)
 	r.POST("/create_channel", CreateChannel)

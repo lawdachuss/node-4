@@ -334,20 +334,8 @@ func VideoDetail(c *gin.Context) {
         stat, statErr := os.Stat(abs)
         fileOnDisk := statErr == nil
 
-	// Read sidecar data (only for disk files)
-	thumbURL := readSidecar(abs + ".thumb")
-	spriteURL := readSidecar(abs + ".sprite")
-
-	// Fall back to preview_links table if sidecars don't exist
-	if thumbURL == "" || spriteURL == "" {
-		dbThumb, dbSprite := server.LoadPreviewLinks(filename)
-		if thumbURL == "" && dbThumb != "" {
-			thumbURL = dbThumb
-		}
-		if spriteURL == "" && dbSprite != "" {
-			spriteURL = dbSprite
-		}
-	}
+	// Load preview URLs from Supabase
+	thumbURL, spriteURL := server.LoadPreviewLinks(filename)
 
         // Look up recording metadata from recordings DB
         db := loadRecordings()
@@ -425,7 +413,7 @@ func VideoDetail(c *gin.Context) {
                 return
         }
 
-        // Use DB thumbnail/sprite if sidecar files don't exist
+        // Fall back to recordings DB if preview_links table had empty URLs
         if thumbURL == "" && dbThumbnailURL != "" {
                 thumbURL = dbThumbnailURL
         }
@@ -664,49 +652,6 @@ func videoURLForHostLink(host, link string) string {
         default:
                 return ""
         }
-}
-
-func readSidecar(path string) string {
-        if d, e := os.ReadFile(path); e == nil {
-                return strings.TrimSpace(string(d))
-        }
-        return ""
-}
-
-// ServeThumb serves the locally-stored .thumb.jpg file for a recording.
-// Usage: GET /thumb?path=videos/foo.mkv
-func ServeThumb(c *gin.Context) {
-        serveLocalImage(c, ".thumb.jpg")
-}
-
-// ServeSprite serves the locally-stored .sprite.jpg file for a recording.
-// Usage: GET /sprite?path=videos/foo.mkv
-func ServeSprite(c *gin.Context) {
-        serveLocalImage(c, ".sprite.jpg")
-}
-
-func serveLocalImage(c *gin.Context, suffix string) {
-        path := c.Query("path")
-        if path == "" {
-                c.Status(http.StatusBadRequest)
-                return
-        }
-        abs, err := filepath.Abs(path + suffix)
-        if err != nil {
-                c.Status(http.StatusNotFound)
-                return
-        }
-        wd, _ := os.Getwd()
-        if !strings.HasPrefix(abs, wd) {
-                c.Status(http.StatusForbidden)
-                return
-        }
-        if _, err := os.Stat(abs); err != nil {
-                c.Status(http.StatusNotFound)
-                return
-        }
-        c.Header("Cache-Control", "public, max-age=604800")
-        c.File(abs)
 }
 
 // ─── Tunnel API ──────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import (
         "context"
         "encoding/json"
         "fmt"
+        "log"
         "net/http"
         "os"
         "path/filepath"
@@ -156,7 +157,7 @@ func (m *Manager) LoadConfig() error {
 }
 
 // ScanThumbnails walks the videos directory and generates thumbnails for any
-// video file that is missing a .thumb sidecar file.
+// video file that is missing preview URLs in Supabase.
 func (m *Manager) ScanThumbnails() {
         videoExts := map[string]bool{".mp4": true, ".mkv": true}
         dirs := []string{"videos"}
@@ -174,11 +175,17 @@ func (m *Manager) ScanThumbnails() {
                         if strings.Contains(info.Name(), ".video.") || strings.Contains(info.Name(), ".audio.") {
                                 return nil
                         }
-                        // Only process files that are missing a .thumb sidecar
-                        if _, statErr := os.Stat(path + ".thumb"); !os.IsNotExist(statErr) {
+                        // Only process files that are missing preview URLs in Supabase
+                        thumbURL, spriteURL := server.LoadPreviewLinks(info.Name())
+                        if thumbURL != "" && spriteURL != "" {
                                 return nil
                         }
-                        channel.GenerateThumbnailForFile(path)
+                        newThumb, newSprite := channel.GenerateThumbnailForFile(path)
+                        if newThumb != "" || newSprite != "" {
+                                if err := server.SavePreviewLinks(info.Name(), newThumb, newSprite); err != nil {
+                                        log.Printf("[thumb] failed to save preview links for %s: %v", info.Name(), err)
+                                }
+                        }
                         return nil
                 })
         }
@@ -219,6 +226,16 @@ func (m *Manager) StopChannel(username string) error {
                 return fmt.Errorf("save config: %w", err)
         }
         return nil
+}
+
+// WaitForUploads blocks until all in-flight upload goroutines across every
+// channel have finished. Call this during graceful shutdown so recordings
+// are not lost when the container receives SIGTERM.
+func (m *Manager) WaitForUploads() {
+        m.Channels.Range(func(key, value any) bool {
+                value.(*channel.Channel).UploadWg.Wait()
+                return true
+        })
 }
 
 // PauseChannel pauses the channel.

@@ -24,113 +24,337 @@
         })();
     </script>
     <style>
-        body { background: #07070a; color: #e4e4e7; min-height: 100dvh; font-family: 'Inter', sans-serif; }
+        * { box-sizing: border-box; }
+        body { background: #06060a; color: #e4e4e7; min-height: 100dvh; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
 
         /* ── Theater mode ── */
-        .theater #page-container, .theater #page-content { max-width: 100% !important; padding-left: 1.5rem; padding-right: 1.5rem; }
-        @media (min-width: 1024px) { .theater #page-container, .theater #page-content { padding-left: 3rem; padding-right: 3rem; } }
-        .theater #player-container video { max-height: 88vh; }
+        .theater #page-container, .theater #page-content { max-width: 100% !important; padding-left: 2rem; padding-right: 2rem; }
+        @media (min-width: 1024px) { .theater #page-container, .theater #page-content { padding-left: 4rem; padding-right: 4rem; } }
+        .theater .player-wrapper video { max-height: 88vh; }
 
-        /* ── Sticky header ── */
+        /* ── Header ── */
         .page-header {
-            background: rgba(8,8,11,0.92);
-            backdrop-filter: blur(20px);
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            background: rgba(8,8,12,0.85);
+            backdrop-filter: blur(24px) saturate(1.2);
+            border-bottom: 1px solid rgba(255,255,255,0.04);
             position: sticky; top: 0; z-index: 50;
         }
+        .header-btn {
+            width: 36px; height: 36px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.06);
+            color: #71717a;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .header-btn:hover { background: rgba(255,255,255,0.08); color: #d4d4d8; }
 
         /* ── Player ── */
-        #player-container {
-            background: #000;
+        .player-wrapper {
+            position: relative;
             border-radius: 16px;
             overflow: hidden;
-            box-shadow: 0 0 0 1px rgba(255,255,255,0.05), 0 32px 80px rgba(0,0,0,0.8);
+            background: #000;
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 32px 80px rgba(0,0,0,0.8);
+        }
+        .player-wrapper video {
+            width: 100%;
+            display: block;
+            max-height: 76vh;
+            background: #000;
+        }
+
+        /* ── Custom Controls ── */
+        .custom-controls {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 60%, transparent 100%);
+            padding: 40px 16px 12px;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            z-index: 10;
+        }
+        .player-wrapper:hover .custom-controls,
+        .player-wrapper.controls-visible .custom-controls { opacity: 1; }
+
+        /* Progress bar */
+        .progress-container {
+            position: relative;
+            height: 4px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: height 0.15s ease;
+        }
+        .progress-container:hover { height: 6px; }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #e11d48, #f43f5e);
+            border-radius: 4px;
+            position: relative;
+            transition: width 0.1s linear;
+        }
+        .progress-container:hover .progress-bar::after {
+            content: '';
+            position: absolute;
+            right: -6px; top: 50%;
+            transform: translateY(-50%);
+            width: 12px; height: 12px;
+            background: #f43f5e;
+            border-radius: 50%;
+            box-shadow: 0 0 8px rgba(225,29,72,0.5);
+        }
+        .progress-hover {
+            position: absolute;
+            top: 0; left: 0; bottom: 0;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            pointer-events: none;
+        }
+        .progress-time-tooltip {
+            position: absolute;
+            bottom: 14px;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(8px);
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 6px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s;
+            white-space: nowrap;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .progress-container:hover .progress-time-tooltip { opacity: 1; }
+
+        /* Controls row */
+        .controls-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .ctrl-left, .ctrl-right { display: flex; align-items: center; gap: 4px; }
+
+        .ctrl-btn {
+            width: 36px; height: 36px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: rgba(255,255,255,0.8);
+            cursor: pointer;
+            transition: all 0.15s;
             position: relative;
         }
-        #player-container video { width: 100%; display: block; max-height: 76vh; background: #000; }
-        #loading-spinner { min-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #52525b; }
+        .ctrl-btn:hover { background: rgba(255,255,255,0.1); color: white; }
+        .ctrl-btn svg { width: 18px; height: 18px; }
 
-        /* ── Controls bar ── */
-        .controls-bar {
-            margin-top: 10px;
-            display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
-            padding: 10px 14px;
-            border-radius: 12px;
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.06);
+        /* Volume */
+        .volume-wrap {
+            display: flex; align-items: center; gap: 4px;
+            position: relative;
         }
-        .ctrl-btn {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 600;
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
-            color: #71717a; cursor: pointer; transition: all 0.15s ease;
+        .volume-slider {
+            width: 0;
+            opacity: 0;
+            transition: width 0.2s ease, opacity 0.2s ease;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+            outline: none;
+            cursor: pointer;
         }
-        .ctrl-btn:hover { background: rgba(255,255,255,0.09); color: #d4d4d8; }
-        .ctrl-btn-green { background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.2); color: #34d399; }
-        .ctrl-btn-green:hover { background: rgba(16,185,129,0.18); }
+        .volume-wrap:hover .volume-slider { width: 70px; opacity: 1; }
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px; height: 12px;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 6px rgba(0,0,0,0.3);
+        }
+        .volume-slider::-moz-range-thumb {
+            width: 12px; height: 12px;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+
+        /* Time display */
+        .time-display {
+            font-size: 12px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.7);
+            font-variant-numeric: tabular-nums;
+            margin-left: 8px;
+            white-space: nowrap;
+        }
+
+        /* Speed select */
+        .speed-select {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 6px;
+            color: rgba(255,255,255,0.8);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 6px;
+            cursor: pointer;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        .speed-select:hover { background: rgba(255,255,255,0.12); }
+        .speed-select option { background: #18181b; color: #e4e4e7; }
+
+        /* ── Center play overlay ── */
+        .center-play {
+            position: absolute; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.3);
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 5;
+            cursor: pointer;
+        }
+        .player-wrapper.paused .center-play { opacity: 1; }
+        .center-play-btn {
+            width: 64px; height: 64px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.2);
+            backdrop-filter: blur(12px);
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+        }
+        .center-play:hover .center-play-btn { background: rgba(255,255,255,0.18); transform: scale(1.08); }
+        .center-play-btn svg { width: 28px; height: 28px; color: white; margin-left: 3px; }
+
+        /* ── Loading ── */
+        .loading-overlay {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            gap: 12px;
+            background: #000;
+            z-index: 20;
+        }
+        .loading-overlay.hidden { display: none; }
 
         /* ── Meta card ── */
         .meta-card {
-            margin-top: 14px;
-            background: rgba(15,15,20,0.9);
-            border: 1px solid rgba(255,255,255,0.06);
+            margin-top: 16px;
+            background: rgba(14,14,18,0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.05);
             border-radius: 16px;
             overflow: hidden;
         }
-        .meta-top { padding: 18px 20px; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; padding: 18px 20px; }
-        .meta-cell { background: rgba(255,255,255,0.03); border-radius: 10px; padding: 10px 14px; border: 1px solid rgba(255,255,255,0.05); }
+        .meta-top {
+            padding: 20px 22px;
+            display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 10px;
+            padding: 18px 22px;
+        }
+        .meta-cell {
+            background: rgba(255,255,255,0.025);
+            border-radius: 10px;
+            padding: 10px 14px;
+            border: 1px solid rgba(255,255,255,0.04);
+            transition: all 0.15s;
+        }
+        .meta-cell:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.06); }
         .meta-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #3f3f46; margin-bottom: 5px; }
         .meta-value { font-size: 13px; font-weight: 600; color: #d4d4d8; }
 
-        /* ── Action btn ── */
+        /* ── Action buttons ── */
         .action-btn {
             display: inline-flex; align-items: center; gap: 7px;
-            padding: 8px 15px; border-radius: 10px; font-size: 12px; font-weight: 600;
-            cursor: pointer; transition: all 0.2s ease; border: none; text-decoration: none;
+            padding: 8px 16px; border-radius: 10px; font-size: 12px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s; border: none; text-decoration: none;
         }
-        .action-btn-green { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.25); color: #34d399; }
+        .action-btn-green { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.2); color: #34d399; }
         .action-btn-green:hover { background: rgba(16,185,129,0.2); }
-        .action-btn-ghost { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); color: #71717a; }
-        .action-btn-ghost:hover { background: rgba(255,255,255,0.09); color: #d4d4d8; }
-        .action-btn-danger { background: rgba(225,29,72,0.08); border: 1px solid rgba(225,29,72,0.18); color: #f87171; }
+        .action-btn-ghost { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); color: #71717a; }
+        .action-btn-ghost:hover { background: rgba(255,255,255,0.08); color: #d4d4d8; }
+        .action-btn-danger { background: rgba(225,29,72,0.08); border: 1px solid rgba(225,29,72,0.15); color: #f87171; }
         .action-btn-danger:hover { background: rgba(225,29,72,0.15); }
-        .action-btn-primary { background: linear-gradient(135deg,#e11d48,#be185d); color: white; box-shadow: 0 4px 14px rgba(225,29,72,0.25); }
-        .action-btn-primary:hover { box-shadow: 0 6px 20px rgba(225,29,72,0.35); transform: translateY(-1px); }
 
-        /* ── Kbd ── */
-        .kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 3px; font-size: 8px; font-weight: 700; background: rgba(255,255,255,0.08); border-radius: 3px; border: 1px solid rgba(255,255,255,0.12); color: rgba(255,255,255,0.4); }
-
-        /* ── Tag / host badge ── */
-        .tag-badge { font-size: 10px; font-weight: 600; padding: 3px 10px; border-radius: 20px; background: rgba(139,92,246,0.1); color: #a78bfa; border: 1px solid rgba(139,92,246,0.2); }
-        .host-badge { font-size: 11px; font-weight: 600; padding: 5px 14px; border-radius: 8px; background: rgba(16,185,129,0.1); color: #34d399; border: 1px solid rgba(16,185,129,0.2); transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
-        .host-badge:hover { background: rgba(16,185,129,0.18); }
-
-        /* ── Related sidebar ── */
-        .related-card {
-            display: flex; gap: 10px; align-items: flex-start;
-            padding: 10px; border-radius: 12px;
-            background: rgba(18,18,22,0.7);
-            border: 1px solid rgba(255,255,255,0.05);
-            cursor: pointer; transition: all 0.2s ease;
+        /* ── Tags / badges ── */
+        .tag-badge { font-size: 10px; font-weight: 600; padding: 3px 10px; border-radius: 20px; background: rgba(139,92,246,0.08); color: #a78bfa; border: 1px solid rgba(139,92,246,0.15); }
+        .host-link {
+            font-size: 11px; font-weight: 600; padding: 6px 14px; border-radius: 8px;
+            background: rgba(16,185,129,0.1); color: #34d399;
+            border: 1px solid rgba(16,185,129,0.15);
+            transition: all 0.15s;
+            display: inline-flex; align-items: center; gap: 6px;
+            text-decoration: none;
         }
-        .related-card:hover { background: rgba(255,255,255,0.04); border-color: rgba(225,29,72,0.15); transform: translateX(3px); }
-        .related-thumb { width: 88px; min-width: 88px; height: 52px; border-radius: 8px; overflow: hidden; background: #0c0c0f; }
-        .related-thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .host-link:hover { background: rgba(16,185,129,0.18); transform: translateY(-1px); }
 
-        /* ── Upload state ── */
-        .upload-placeholder { padding: 60px 20px; text-align: center; background: rgba(16,185,129,0.04); border: 1px solid rgba(16,185,129,0.1); border-radius: 16px; margin-bottom: 16px; }
+        /* ── Related videos ── */
+        .related-card {
+            display: flex; gap: 12px; align-items: flex-start;
+            padding: 10px; border-radius: 12px;
+            background: rgba(14,14,18,0.6);
+            border: 1px solid rgba(255,255,255,0.04);
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.16,1,0.3,1);
+        }
+        .related-card:hover {
+            background: rgba(255,255,255,0.04);
+            border-color: rgba(225,29,72,0.12);
+            transform: translateX(4px);
+        }
+        .related-thumb {
+            width: 96px; min-width: 96px; height: 56px;
+            border-radius: 8px; overflow: hidden; background: #0a0a0e;
+        }
+        .related-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s ease; }
+        .related-card:hover .related-thumb img { transform: scale(1.08); }
+
+        /* ── Upload placeholder ── */
+        .upload-placeholder {
+            padding: 60px 20px; text-align: center;
+            background: rgba(16,185,129,0.03);
+            border: 1px solid rgba(16,185,129,0.08);
+            border-radius: 16px;
+            margin-bottom: 16px;
+        }
+
+        /* ── Toast ── */
+        .copy-toast {
+            position: absolute; top: -4px; right: -4px;
+            font-size: 8px; font-weight: 700;
+            background: #10b981; color: white;
+            padding: 2px 6px; border-radius: 20px;
+            opacity: 0; transition: opacity 0.2s;
+            pointer-events: none;
+        }
     </style>
 </head>
-<body data-video-page="{{ if or .FullPath .VideoURL .EmbedURL }}true{{ end }}">
+<body data-video-page="{{ or .FullPath .VideoURL .EmbedURL }}">
 
 <!-- ═══ HEADER ═══ -->
 <div class="page-header">
     <div id="page-container" class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4 transition-all duration-300">
         <div class="flex items-center gap-3 min-w-0">
-            <a href="javascript:history.back()"
-               class="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all shrink-0"
-               style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07)" title="Back">
+            <a href="javascript:history.back()" class="header-btn shrink-0" title="Back">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             </a>
             <div class="min-w-0">
@@ -143,21 +367,16 @@
             </div>
         </div>
         <div class="flex items-center gap-1.5 shrink-0">
-            <button onclick="copyVideoLink()" class="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all relative"
-                    style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07)" title="Copy link">
+            <button onclick="copyVideoLink()" class="header-btn relative" title="Copy link">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-                <span id="copy-toast" class="absolute -top-1 -right-1 text-[8px] bg-emerald-500 text-white px-1.5 py-0.5 rounded-full opacity-0 transition-opacity pointer-events-none font-bold">✓</span>
+                <span id="copy-toast" class="copy-toast">Copied</span>
             </button>
             {{ if or .FullPath .VideoURL .EmbedURL }}
-            <button onclick="toggleTheaterMode()" id="theater-btn"
-                    class="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all"
-                    style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07)" title="Theater mode (T)">
+            <button onclick="toggleTheaterMode()" id="theater-btn" class="header-btn" title="Theater mode (T)">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
             </button>
             {{ end }}
-            <button onclick="toggleDarkMode()"
-                    class="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all"
-                    style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07)" title="Toggle theme">
+            <button onclick="toggleDarkMode()" class="header-btn" title="Toggle theme">
                 <svg class="w-3.5 h-3.5 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
                 <svg class="w-3.5 h-3.5 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
             </button>
@@ -165,146 +384,151 @@
     </div>
 </div>
 
-<!-- ═══ PAGE CONTENT ═══ -->
+<!-- ═══ CONTENT ═══ -->
 <div id="page-content" class="max-w-6xl mx-auto px-4 py-6 transition-all duration-300">
 
-    <!-- Ambient glow behind player -->
+    <!-- Ambient glow -->
     <div style="position:relative">
-        <div style="position:absolute;top:20%;left:50%;transform:translateX(-50%);width:60%;height:200px;background:radial-gradient(ellipse,rgba(225,29,72,0.06) 0%,transparent 70%);pointer-events:none;z-index:0"></div>
+        <div style="position:absolute;top:10%;left:50%;transform:translateX(-50%);width:50%;height:250px;background:radial-gradient(ellipse,rgba(225,29,72,0.05) 0%,transparent 70%);pointer-events:none;z-index:0"></div>
     </div>
 
 {{ if .FullPath }}
-<!-- ──────────── LOCAL FILE PLAYER ──────────── -->
+<!-- ── LOCAL FILE PLAYER ── -->
 <div id="player-section" class="mb-1 relative" style="z-index:1">
-    <div id="player-container" data-state="loading">
-        <div id="loading-spinner">
-            <svg class="w-10 h-10 animate-spin text-zinc-700" fill="none" viewBox="0 0 24 24">
+    <div class="player-wrapper paused" id="player-container" data-state="loading">
+        <div class="loading-overlay" id="loading-spinner">
+            <svg class="w-8 h-8 animate-spin text-zinc-700" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
             </svg>
-            <span class="text-sm text-zinc-600">Loading video…</span>
+            <span class="text-xs text-zinc-600">Loading video…</span>
         </div>
-        <video id="video-player" controls preload="metadata" class="hidden"
+        <video id="video-player" preload="metadata" playsinline
                poster="{{ if .ThumbnailURL }}{{ .ThumbnailURL }}{{ end }}"
-               onloadeddata="playerLoaded()" onerror="playerError()">
+               onloadeddata="playerLoaded()" onerror="playerError()" onplay="onPlay()" onpause="onPause()">
             <source src="/play?path={{ .FullPath | urlquery }}" type="{{ .MimeType }}" />
         </video>
-        <div id="error-message" class="hidden flex-col items-center justify-center py-16 text-zinc-500">
+        <div class="center-play" onclick="togglePlay()">
+            <div class="center-play-btn">
+                <svg fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21"/></svg>
+            </div>
+        </div>
+        <div id="error-message" class="hidden" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000;z-index:20;color:#71717a">
             <svg class="w-12 h-12 mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
             <p class="text-sm mb-4">Could not load video</p>
             <button onclick="retryVideo()" class="action-btn action-btn-ghost text-xs">Retry</button>
         </div>
-    </div>
-    <!-- Controls bar -->
-    <div class="controls-bar">
-        <div class="flex items-center gap-2">
-            <button onclick="togglePlay()" class="ctrl-btn" title="Space">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Play/Pause
-                <span class="kbd">Space</span>
-            </button>
-            <button onclick="toggleMute()" class="ctrl-btn" title="M">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 010 7"/></svg>
-                Mute
-                <span class="kbd">M</span>
-            </button>
-        </div>
-        <div class="flex items-center gap-2">
-            <div class="ctrl-btn" style="padding:5px 10px;gap:6px">
-                <svg class="w-3.5 h-3.5 text-zinc-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/></svg>
-                <select id="speed-select" onchange="changeSpeed(this.value)"
-                        class="bg-transparent text-zinc-300 text-[11px] border-none p-0 m-0 focus:outline-none cursor-pointer" style="background-image:none;box-shadow:none">
-                    <option value="0.5">0.5×</option>
-                    <option value="0.75">0.75×</option>
-                    <option value="1" selected>1×</option>
-                    <option value="1.25">1.25×</option>
-                    <option value="1.5">1.5×</option>
-                    <option value="2">2×</option>
-                </select>
+        <!-- Custom controls -->
+        <div class="custom-controls">
+            <div class="progress-container" id="progress-container">
+                <div class="progress-hover" id="progress-hover"></div>
+                <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+                <div class="progress-time-tooltip" id="progress-tooltip">0:00</div>
             </div>
-            <button onclick="togglePiP()" class="ctrl-btn" title="Picture-in-Picture">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 15l6-6m0 0v4m0-4h-4M9 9H5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-4"/></svg>
-                PiP
-            </button>
-            <button onclick="toggleFullscreen()" class="ctrl-btn" title="Fullscreen (F)">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
-                Full
-                <span class="kbd">F</span>
-            </button>
+            <div class="controls-row">
+                <div class="ctrl-left">
+                    <button class="ctrl-btn" onclick="togglePlay()" title="Play (Space)">
+                        <svg id="icon-play" fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21"/></svg>
+                        <svg id="icon-pause" fill="currentColor" viewBox="0 0 24 24" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    </button>
+                    <div class="volume-wrap">
+                        <button class="ctrl-btn" onclick="toggleMute()" title="Mute (M)">
+                            <svg id="icon-vol" fill="currentColor" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19.07 4.93a10 10 0 010 14.14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                            <svg id="icon-muted" fill="currentColor" viewBox="0 0 24 24" style="display:none"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="17" y1="9" x2="23" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        </button>
+                        <input type="range" class="volume-slider" id="volume-slider" min="0" max="1" step="0.05" value="1" oninput="setVolume(this.value)" />
+                    </div>
+                    <span class="time-display"><span id="time-current">0:00</span> / <span id="time-total">0:00</span></span>
+                </div>
+                <div class="ctrl-right">
+                    <select class="speed-select" onchange="changeSpeed(this.value)" title="Playback speed">
+                        <option value="0.5">0.5x</option>
+                        <option value="0.75">0.75x</option>
+                        <option value="1" selected>1x</option>
+                        <option value="1.25">1.25x</option>
+                        <option value="1.5">1.5x</option>
+                        <option value="2">2x</option>
+                    </select>
+                    <button class="ctrl-btn" onclick="togglePiP()" title="Picture-in-Picture (P)">
+                        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 15l6-6m0 0v4m0-4h-4M9 9H5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-4"/></svg>
+                    </button>
+                    <button class="ctrl-btn" onclick="toggleFullscreen()" title="Fullscreen (F)">
+                        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 {{ else if .VideoURL }}
-<!-- ──────────── EXTERNAL URL PLAYER ──────────── -->
+<!-- ── EXTERNAL URL PLAYER ── -->
 <div id="player-section" class="mb-1 relative" style="z-index:1">
-    <div id="player-container" data-state="loading">
-        <div id="loading-spinner">
-            <svg class="w-10 h-10 animate-spin text-zinc-700" fill="none" viewBox="0 0 24 24">
+    <div class="player-wrapper paused" id="player-container" data-state="loading">
+        <div class="loading-overlay" id="loading-spinner">
+            <svg class="w-8 h-8 animate-spin text-zinc-700" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
             </svg>
-            <span class="text-sm text-zinc-600">Loading video…</span>
+            <span class="text-xs text-zinc-600">Loading video…</span>
         </div>
-        <video id="video-player" controls preload="metadata" class="hidden"
+        <video id="video-player" preload="metadata" playsinline crossorigin="anonymous"
                poster="{{ if .ThumbnailURL }}{{ .ThumbnailURL }}{{ end }}"
-               onloadeddata="playerLoaded()" onerror="playerError()" crossorigin="anonymous">
+               onloadeddata="playerLoaded()" onerror="playerError()" onplay="onPlay()" onpause="onPause()">
             <source src="{{ .VideoURL }}" type="video/mp4" />
         </video>
-        <div id="error-message" class="hidden flex-col items-center justify-center py-16 text-zinc-500">
+        <div class="center-play" onclick="togglePlay()">
+            <div class="center-play-btn">
+                <svg fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21"/></svg>
+            </div>
+        </div>
+        <div id="error-message" class="hidden" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000;z-index:20;color:#71717a">
             <svg class="w-12 h-12 mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
             <p class="text-sm mb-4">Could not load video directly.</p>
             <div class="flex gap-2">
-                {{ if .EmbedURL }}
-                <button onclick="switchToEmbed()" class="action-btn action-btn-green text-xs">Switch to Embed</button>
-                {{ end }}
+                {{ if .EmbedURL }}<button onclick="switchToEmbed()" class="action-btn action-btn-green text-xs">Switch to Embed</button>{{ end }}
                 <button onclick="retryVideo()" class="action-btn action-btn-ghost text-xs">Retry</button>
             </div>
         </div>
-    </div>
-    <!-- Controls bar -->
-    <div class="controls-bar">
-        <div class="flex items-center gap-2">
-            <button onclick="togglePlay()" class="ctrl-btn" title="Space">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Play/Pause <span class="kbd">Space</span>
-            </button>
-            <button onclick="toggleMute()" class="ctrl-btn" title="M">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 010 7"/></svg>
-                Mute <span class="kbd">M</span>
-            </button>
-        </div>
-        <div class="flex items-center gap-2">
-            {{ if .EmbedURL }}
-            <button onclick="switchToEmbed()" class="ctrl-btn ctrl-btn-green">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
-                Embed
-            </button>
-            {{ end }}
-            <div class="ctrl-btn" style="padding:5px 10px;gap:6px">
-                <svg class="w-3.5 h-3.5 text-zinc-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/></svg>
-                <select id="speed-select" onchange="changeSpeed(this.value)"
-                        class="bg-transparent text-zinc-300 text-[11px] border-none p-0 m-0 focus:outline-none cursor-pointer" style="background-image:none;box-shadow:none">
-                    <option value="0.5">0.5×</option>
-                    <option value="0.75">0.75×</option>
-                    <option value="1" selected>1×</option>
-                    <option value="1.25">1.25×</option>
-                    <option value="1.5">1.5×</option>
-                    <option value="2">2×</option>
-                </select>
+        <div class="custom-controls">
+            <div class="progress-container" id="progress-container">
+                <div class="progress-hover" id="progress-hover"></div>
+                <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+                <div class="progress-time-tooltip" id="progress-tooltip">0:00</div>
             </div>
-            <button onclick="togglePiP()" class="ctrl-btn">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 15l6-6m0 0v4m0-4h-4M9 9H5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-4"/></svg>
-                PiP
-            </button>
+            <div class="controls-row">
+                <div class="ctrl-left">
+                    <button class="ctrl-btn" onclick="togglePlay()" title="Play (Space)">
+                        <svg id="icon-play" fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21"/></svg>
+                        <svg id="icon-pause" fill="currentColor" viewBox="0 0 24 24" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    </button>
+                    <div class="volume-wrap">
+                        <button class="ctrl-btn" onclick="toggleMute()" title="Mute (M)">
+                            <svg id="icon-vol" fill="currentColor" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19.07 4.93a10 10 0 010 14.14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                            <svg id="icon-muted" fill="currentColor" viewBox="0 0 24 24" style="display:none"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="17" y1="9" x2="23" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        </button>
+                        <input type="range" class="volume-slider" id="volume-slider" min="0" max="1" step="0.05" value="1" oninput="setVolume(this.value)" />
+                    </div>
+                    <span class="time-display"><span id="time-current">0:00</span> / <span id="time-total">0:00</span></span>
+                </div>
+                <div class="ctrl-right">
+                    {{ if .EmbedURL }}<button class="ctrl-btn" onclick="switchToEmbed()" title="Switch to embed" style="color:#34d399"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg></button>{{ end }}
+                    <select class="speed-select" onchange="changeSpeed(this.value)" title="Playback speed">
+                        <option value="0.5">0.5x</option><option value="0.75">0.75x</option><option value="1" selected>1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">2x</option>
+                    </select>
+                    <button class="ctrl-btn" onclick="togglePiP()" title="PiP (P)">
+                        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 15l6-6m0 0v4m0-4h-4M9 9H5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-4"/></svg>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 {{ else if .EmbedURL }}
-<!-- ──────────── EMBED IFRAME PLAYER ──────────── -->
+<!-- ── EMBED IFRAME ── -->
 <div id="player-section" class="mb-1 relative" style="z-index:1">
-    <div id="player-container" style="border-radius:16px;overflow:hidden;position:relative;padding-top:56.25%">
+    <div class="player-wrapper" style="padding-top:56.25%">
         <iframe src="{{ .EmbedURL }}" allowfullscreen
                 style="position:absolute;top:0;left:0;width:100%;height:100%"
                 scrolling="no" frameborder="0" referrerpolicy="origin-when-cross-origin">
@@ -313,9 +537,9 @@
 </div>
 
 {{ else }}
-<!-- ──────────── UPLOADED / NO VIDEO ──────────── -->
+<!-- ── UPLOADED / NO VIDEO ── -->
 <div class="upload-placeholder mb-1">
-    <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2)">
+    <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.15)">
         <svg class="w-7 h-7 text-emerald-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
             <path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
         </svg>
@@ -323,16 +547,13 @@
     <h2 class="text-base font-bold text-zinc-300 mb-1">File Uploaded</h2>
     <p class="text-sm text-zinc-500 max-w-sm mx-auto">This recording has been uploaded to external hosts and removed from local storage.</p>
     {{ if .ThumbnailURL }}
-    <img src="{{ .ThumbnailURL }}" alt="" class="mt-5 max-h-48 rounded-xl mx-auto object-cover opacity-60" />
+    <img src="{{ .ThumbnailURL }}" alt="" class="mt-5 max-h-48 rounded-xl mx-auto object-cover opacity-50" />
     {{ end }}
 </div>
 {{ end }}
 
-<!-- ══════════════════════════════════════════════════ -->
-<!-- META CARD                                          -->
-<!-- ══════════════════════════════════════════════════ -->
+<!-- ═══ META CARD ═══ -->
 <div class="meta-card">
-    <!-- Top: channel + actions -->
     <div class="meta-top">
         <div class="flex items-center gap-3 min-w-0">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center text-[13px] font-black text-white shrink-0"
@@ -358,8 +579,7 @@
             </a>
             {{ end }}
             {{ range $host, $link := .Links }}
-            <button onclick="embedHost('{{ $host }}')" class="host-badge"
-                    style="border:none;cursor:pointer;font-family:inherit">
+            <button onclick="embedHost('{{ $host }}')" class="host-link" style="border:none;cursor:pointer;font-family:inherit">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                 {{ $host }}
             </button>
@@ -376,13 +596,10 @@
         </div>
     </div>
 
-    <!-- Metadata grid -->
     <div class="meta-grid">
         <div class="meta-cell">
             <div class="meta-label">Channel</div>
-            <div class="meta-value">
-                <a href="/channel?name={{ .Username }}" class="hover:text-rose-400 transition-colors">{{ .Username }}</a>
-            </div>
+            <div class="meta-value"><a href="/channel?name={{ .Username }}" class="hover:text-rose-400 transition-colors">{{ .Username }}</a></div>
         </div>
         <div class="meta-cell">
             <div class="meta-label">Size</div>
@@ -410,10 +627,10 @@
         {{ end }}
     </div>
 
-    {{ if or .RoomTitle .Tags .Countries }}
-    <div style="padding:0 20px 18px">
+    {{ if or .RoomTitle .Tags }}
+    <div style="padding:0 22px 20px">
         {{ if .RoomTitle }}
-        <div class="mb-3 pb-3" style="border-top:1px solid rgba(255,255,255,0.05);padding-top:14px">
+        <div class="mb-3 pb-3" style="border-top:1px solid rgba(255,255,255,0.04);padding-top:14px">
             <div class="meta-label mb-2">Room Title</div>
             <p class="text-sm text-zinc-400 italic">{{ .RoomTitle }}</p>
         </div>
@@ -421,45 +638,32 @@
         {{ if .Tags }}
         <div class="{{ if .RoomTitle }}mt-2{{ end }}">
             <div class="meta-label mb-2">Tags</div>
-            <div class="flex flex-wrap gap-1.5">
-                {{ range .Tags }}<span class="tag-badge">{{ . }}</span>{{ end }}
-            </div>
-        </div>
-        {{ end }}
-        {{ if .Countries }}
-        <div class="mt-3">
-            <div class="meta-label mb-2">Countries</div>
-            <div class="flex flex-wrap gap-1">
-                {{ range .Countries }}<span class="tag-badge" style="background:rgba(6,182,212,0.1);color:#67e8f9;border-color:rgba(6,182,212,0.2)">{{ . }}</span>{{ end }}
-            </div>
+            <div class="flex flex-wrap gap-1.5">{{ range .Tags }}<span class="tag-badge">{{ . }}</span>{{ end }}</div>
         </div>
         {{ end }}
     </div>
     {{ end }}
-
 </div>
 
-<!-- ══════════════════════════════════════════════════ -->
-<!-- RELATED VIDEOS                                     -->
-<!-- ══════════════════════════════════════════════════ -->
-{{ if .Videos }}
+<!-- ═══ RELATED VIDEOS ═══ -->
+{{ if .Related }}
 <div class="mt-8">
     <div class="flex items-center gap-3 mb-4">
         <h2 class="text-[11px] font-bold uppercase tracking-widest text-zinc-600">More from {{ .Username }}</h2>
-        <div class="flex-1 h-px" style="background:rgba(255,255,255,0.05)"></div>
+        <div class="flex-1 h-px" style="background:rgba(255,255,255,0.04)"></div>
         <a href="/channel?name={{ .Username }}" class="text-[11px] text-zinc-600 hover:text-zinc-300 transition-colors font-medium flex items-center gap-0.5">
             View all
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
         </a>
     </div>
     <div class="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-        {{ range .Videos }}
+        {{ range .Related }}
         <div class="related-card group" onclick="window.location.href='/video?path={{ .FullPath | urlquery }}'">
             <div class="related-thumb shrink-0">
                 {{ if .ThumbnailURL }}
-                <img src="{{ .ThumbnailURL }}" alt="" loading="lazy" class="transition-transform duration-500 group-hover:scale-110" />
+                <img src="{{ .ThumbnailURL }}" alt="" loading="lazy" />
                 {{ else }}
-                <div class="w-full h-full flex items-center justify-center">
+                <div class="w-full h-full flex items-center justify-center" style="background:#0a0a0e">
                     <svg class="w-5 h-5 text-zinc-800" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
                         <path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/>
                     </svg>
@@ -482,7 +686,7 @@
 </div><!-- /page-content -->
 
 <script>
-// ── Host players data ──
+// ── Host players ──
 var hostPlayers = {{ .HostPlayersJSON }};
 
 function embedHost(hostName) {
@@ -491,38 +695,39 @@ function embedHost(hostName) {
     if (player.embedUrl) {
         var ps = document.getElementById('player-section');
         if (!ps) return false;
-        ps.innerHTML = '<div id="player-container" style="border-radius:16px;overflow:hidden;position:relative;padding-top:56.25%">' +
-            '<iframe src="' + player.embedUrl + '" allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%" scrolling="no" frameborder="0" referrerpolicy="origin-when-cross-origin"></iframe>' +
-            '</div>';
+        ps.innerHTML = '<div class="player-wrapper" style="padding-top:56.25%"><iframe src="' + player.embedUrl + '" allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%" scrolling="no" frameborder="0" referrerpolicy="origin-when-cross-origin"></iframe></div>';
         saveLastHost(hostName);
         return true;
     }
     if (player.videoUrl) {
         var ps = document.getElementById('player-section');
         if (!ps) return false;
-        ps.innerHTML = '<div id="player-container" data-state="loading">' +
-            '<div id="loading-spinner" style="min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#52525b">' +
-            '<svg class="w-10 h-10 animate-spin text-zinc-700" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>' +
-            '<span class="text-sm text-zinc-600">Loading video…</span></div>' +
-            '<video id="video-player" controls preload="metadata" class="hidden" onloadeddata="playerLoaded()" onerror="playerError()" crossorigin="anonymous">' +
-            '<source src="' + player.videoUrl + '" type="video/mp4" />' +
-            '</video>' +
-            '<div id="error-message" class="hidden flex-col items-center justify-center py-16 text-zinc-500">' +
-            '<svg class="w-12 h-12 mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>' +
-            '<p class="text-sm mb-4">Could not load video directly.</p>' +
-            '<button onclick="retryVideo()" class="action-btn action-btn-ghost text-xs">Retry</button></div>' +
-            '</div>';
+        ps.innerHTML = buildVideoPlayerHTML(player.videoUrl);
         saveLastHost(hostName);
+        initCustomControls();
         return true;
     }
     window.open(player.link, '_blank');
     return false;
 }
 
-function saveLastHost(host) {
-    try { localStorage.setItem('lastHost_' + '{{ .Filename }}', host); } catch(e) {}
+function buildVideoPlayerHTML(src) {
+    return '<div class="player-wrapper paused" id="player-container" data-state="loading">' +
+        '<div class="loading-overlay" id="loading-spinner"><svg class="w-8 h-8 animate-spin text-zinc-700" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="text-xs text-zinc-600">Loading video…</span></div>' +
+        '<video id="video-player" preload="metadata" playsinline crossorigin="anonymous" onloadeddata="playerLoaded()" onerror="playerError()" onplay="onPlay()" onpause="onPause()"><source src="' + src + '" type="video/mp4" /></video>' +
+        '<div class="center-play" onclick="togglePlay()"><div class="center-play-btn"><svg fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21"/></svg></div></div>' +
+        '<div id="error-message" class="hidden" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000;z-index:20;color:#71717a"><svg class="w-12 h-12 mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg><p class="text-sm mb-4">Could not load video directly.</p><button onclick="retryVideo()" class="action-btn action-btn-ghost text-xs">Retry</button></div>' +
+        '<div class="custom-controls"><div class="progress-container" id="progress-container"><div class="progress-hover" id="progress-hover"></div><div class="progress-bar" id="progress-bar" style="width:0%"></div><div class="progress-time-tooltip" id="progress-tooltip">0:00</div></div>' +
+        '<div class="controls-row"><div class="ctrl-left"><button class="ctrl-btn" onclick="togglePlay()" title="Play (Space)"><svg id="icon-play" fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21"/></svg><svg id="icon-pause" fill="currentColor" viewBox="0 0 24 24" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></button>' +
+        '<div class="volume-wrap"><button class="ctrl-btn" onclick="toggleMute()" title="Mute (M)"><svg id="icon-vol" fill="currentColor" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19.07 4.93a10 10 0 010 14.14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg id="icon-muted" fill="currentColor" viewBox="0 0 24 24" style="display:none"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="17" y1="9" x2="23" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>' +
+        '<input type="range" class="volume-slider" id="volume-slider" min="0" max="1" step="0.05" value="1" oninput="setVolume(this.value)" /></div>' +
+        '<span class="time-display"><span id="time-current">0:00</span> / <span id="time-total">0:00</span></span></div>' +
+        '<div class="ctrl-right"><select class="speed-select" onchange="changeSpeed(this.value)" title="Playback speed"><option value="0.5">0.5x</option><option value="0.75">0.75x</option><option value="1" selected>1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>' +
+        '<button class="ctrl-btn" onclick="togglePiP()" title="PiP (P)"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 15l6-6m0 0v4m0-4h-4M9 9H5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-4"/></svg></button>' +
+        '<button class="ctrl-btn" onclick="toggleFullscreen()" title="Fullscreen (F)"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg></button></div></div></div></div>';
 }
 
+function saveLastHost(host) { try { localStorage.setItem('lastHost_' + '{{ .Filename }}', host); } catch(e) {} }
 function restoreLastHost() {
     try {
         var saved = localStorage.getItem('lastHost_' + '{{ .Filename }}');
@@ -533,9 +738,6 @@ function restoreLastHost() {
     } catch(e) {}
     return false;
 }
-
-// Restore last used host on page load (overrides default player)
-// Only auto-embed when there is no local file and no initial embed rendered
 {{ if and (not .FullPath) (not .EmbedURL) }}
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(function() {
@@ -547,36 +749,35 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 {{ end }}
 
-// ── Dark mode ──
-function toggleDarkMode() {
-    var isDark = document.documentElement.classList.toggle('dark');
-    localStorage.setItem('darkMode', isDark ? 'true' : 'false');
-}
+// ── Theme ──
+function toggleDarkMode() { var isDark = document.documentElement.classList.toggle('dark'); localStorage.setItem('darkMode', isDark ? 'true' : 'false'); }
+function toggleTheaterMode() { var isTheater = document.documentElement.classList.toggle('theater'); localStorage.setItem('theaterMode', isTheater ? 'true' : 'false'); }
 
-// ── Theater mode ──
-function toggleTheaterMode() {
-    var isTheater = document.documentElement.classList.toggle('theater');
-    localStorage.setItem('theaterMode', isTheater ? 'true' : 'false');
-}
-
-// ── Video player helpers ──
+// ── Player helpers ──
 function getVideo() { return document.getElementById('video-player'); }
 
 function playerLoaded() {
-    document.getElementById('loading-spinner').style.display = 'none';
-    var v = getVideo(); if (v) { v.classList.remove('hidden'); v.classList.add('block'); }
-    var c = document.getElementById('player-container'); if (c) c.dataset.state = 'loaded';
+    var spinner = document.getElementById('loading-spinner');
+    if (spinner) spinner.classList.add('hidden');
+    var v = getVideo();
+    if (v) { v.style.display = 'block'; }
+    var c = document.getElementById('player-container');
+    if (c) { c.dataset.state = 'loaded'; updateTotalTime(); }
 }
 function playerError() {
-    document.getElementById('loading-spinner').style.display = 'none';
+    var spinner = document.getElementById('loading-spinner');
+    if (spinner) spinner.classList.add('hidden');
     var msg = document.getElementById('error-message');
-    if (msg) { msg.classList.remove('hidden'); msg.classList.add('flex'); }
-    var c = document.getElementById('player-container'); if (c) c.dataset.state = 'error';
+    if (msg) msg.classList.remove('hidden');
+    var c = document.getElementById('player-container');
+    if (c) c.dataset.state = 'error';
 }
 function retryVideo() {
     var v = getVideo(); if (!v) return;
-    document.getElementById('error-message').classList.add('hidden');
-    document.getElementById('loading-spinner').style.display = 'flex';
+    var msg = document.getElementById('error-message');
+    if (msg) msg.classList.add('hidden');
+    var spinner = document.getElementById('loading-spinner');
+    if (spinner) spinner.classList.remove('hidden');
     var src = v.querySelector('source');
     if (src) { var s = src.src; src.src = ''; src.src = s; }
     v.load();
@@ -585,21 +786,139 @@ function switchToEmbed() {
     {{ if .EmbedURL }}
     var ps = document.getElementById('player-section');
     if (!ps) return;
-    ps.innerHTML = '<div id="player-container" style="border-radius:16px;overflow:hidden;position:relative;padding-top:56.25%"><iframe src="{{ .EmbedURL }}" allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%" scrolling="no" frameborder="0" referrerpolicy="origin-when-cross-origin"></iframe></div>';
+    ps.innerHTML = '<div class="player-wrapper" style="padding-top:56.25%"><iframe src="{{ .EmbedURL }}" allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%" scrolling="no" frameborder="0" referrerpolicy="origin-when-cross-origin"></iframe></div>';
     {{ end }}
 }
 
 function togglePlay() { var v = getVideo(); if (v) v.paused ? v.play() : v.pause(); }
-function toggleMute() { var v = getVideo(); if (v) v.muted = !v.muted; }
+function toggleMute() { var v = getVideo(); if (v) v.muted = !v.muted; updateVolumeIcon(); }
+function setVolume(val) { var v = getVideo(); if (v) { v.volume = parseFloat(val); v.muted = val == 0; updateVolumeIcon(); } }
 function changeSpeed(s) { var v = getVideo(); if (v) v.playbackRate = parseFloat(s); }
 function togglePiP() { var v = getVideo(); if (v && document.pictureInPictureEnabled) { if (document.pictureInPictureElement) document.exitPictureInPicture(); else v.requestPictureInPicture(); } }
 function toggleFullscreen() {
-    var v = getVideo();
-    if (!v) return;
+    var wrapper = document.querySelector('.player-wrapper');
+    if (!wrapper) return;
     if (document.fullscreenElement) document.exitFullscreen();
-    else if (v.requestFullscreen) v.requestFullscreen();
-    else if (v.webkitRequestFullscreen) v.webkitRequestFullscreen();
+    else if (wrapper.requestFullscreen) wrapper.requestFullscreen();
+    else if (wrapper.webkitRequestFullscreen) wrapper.webkitRequestFullscreen();
 }
+
+function onPlay() {
+    var wrapper = document.querySelector('.player-wrapper');
+    if (wrapper) wrapper.classList.remove('paused');
+    var playIcon = document.getElementById('icon-play');
+    var pauseIcon = document.getElementById('icon-pause');
+    if (playIcon) playIcon.style.display = 'none';
+    if (pauseIcon) pauseIcon.style.display = 'block';
+}
+function onPause() {
+    var wrapper = document.querySelector('.player-wrapper');
+    if (wrapper) wrapper.classList.add('paused');
+    var playIcon = document.getElementById('icon-play');
+    var pauseIcon = document.getElementById('icon-pause');
+    if (playIcon) playIcon.style.display = 'block';
+    if (pauseIcon) pauseIcon.style.display = 'none';
+}
+
+function updateVolumeIcon() {
+    var v = getVideo(); if (!v) return;
+    var volIcon = document.getElementById('icon-vol');
+    var mutedIcon = document.getElementById('icon-muted');
+    if (v.muted || v.volume === 0) { if (volIcon) volIcon.style.display = 'none'; if (mutedIcon) mutedIcon.style.display = 'block'; }
+    else { if (volIcon) volIcon.style.display = 'block'; if (mutedIcon) mutedIcon.style.display = 'none'; }
+}
+
+function formatTime(seconds) {
+    if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+    var h = Math.floor(seconds / 3600);
+    var m = Math.floor((seconds % 3600) / 60);
+    var s = Math.floor(seconds % 60);
+    if (h > 0) return h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function updateTotalTime() {
+    var v = getVideo(); if (!v) return;
+    var total = document.getElementById('time-total');
+    if (total) total.textContent = formatTime(v.duration);
+}
+
+function initCustomControls() {
+    var v = getVideo(); if (!v) return;
+
+    // Hide native controls
+    v.controls = false;
+    v.removeAttribute('controls');
+
+    // Time update
+    v.addEventListener('timeupdate', function() {
+        var pct = (v.currentTime / v.duration) * 100;
+        var bar = document.getElementById('progress-bar');
+        var current = document.getElementById('time-current');
+        if (bar) bar.style.width = pct + '%';
+        if (current) current.textContent = formatTime(v.currentTime);
+    });
+
+    v.addEventListener('loadedmetadata', updateTotalTime);
+
+    // Progress bar seek
+    var container = document.getElementById('progress-container');
+    if (container) {
+        container.addEventListener('click', function(e) {
+            var rect = container.getBoundingClientRect();
+            var pct = (e.clientX - rect.left) / rect.width;
+            v.currentTime = pct * v.duration;
+        });
+        container.addEventListener('mousemove', function(e) {
+            var rect = container.getBoundingClientRect();
+            var pct = (e.clientX - rect.left) / rect.width;
+            var hover = document.getElementById('progress-hover');
+            var tooltip = document.getElementById('progress-tooltip');
+            if (hover) hover.style.width = (pct * 100) + '%';
+            if (tooltip) {
+                tooltip.style.left = (pct * 100) + '%';
+                tooltip.textContent = formatTime(pct * v.duration);
+            }
+        });
+    }
+
+    // Auto-hide controls
+    var wrapper = document.querySelector('.player-wrapper');
+    var hideTimer;
+    if (wrapper) {
+        wrapper.addEventListener('mousemove', function() {
+            wrapper.classList.add('controls-visible');
+            clearTimeout(hideTimer);
+            hideTimer = setTimeout(function() { wrapper.classList.remove('controls-visible'); }, 3000);
+        });
+        wrapper.addEventListener('mouseleave', function() {
+            clearTimeout(hideTimer);
+            hideTimer = setTimeout(function() { wrapper.classList.remove('controls-visible'); }, 1000);
+        });
+    }
+
+    // Volume slider sync
+    var slider = document.getElementById('volume-slider');
+    if (slider) slider.value = v.volume;
+    updateVolumeIcon();
+}
+
+// ── Init controls on page load ──
+document.addEventListener('DOMContentLoaded', function() {
+    initCustomControls();
+
+    // Persist playback position
+    var v = getVideo(); if (!v) return;
+    var key = 'pos_{{ .Filename }}';
+    var saved = parseFloat(localStorage.getItem(key) || '0');
+    if (saved > 5) {
+        v.addEventListener('loadedmetadata', function() { v.currentTime = saved; }, { once: true });
+    }
+    v.addEventListener('timeupdate', function() {
+        if (v.currentTime > 5) localStorage.setItem(key, v.currentTime);
+    });
+    v.addEventListener('ended', function() { localStorage.removeItem(key); });
+});
 
 // ── Copy link ──
 function copyVideoLink() {
@@ -620,26 +939,12 @@ document.addEventListener('keydown', function(e) {
     if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
     else if (e.code === 'ArrowRight') { e.preventDefault(); v.currentTime += e.shiftKey ? 30 : 10; }
     else if (e.code === 'ArrowLeft') { e.preventDefault(); v.currentTime -= e.shiftKey ? 30 : 10; }
-    else if (e.code === 'ArrowUp') { e.preventDefault(); v.volume = Math.min(1, v.volume + 0.1); }
-    else if (e.code === 'ArrowDown') { e.preventDefault(); v.volume = Math.max(0, v.volume - 0.1); }
+    else if (e.code === 'ArrowUp') { e.preventDefault(); v.volume = Math.min(1, v.volume + 0.1); var s = document.getElementById('volume-slider'); if (s) s.value = v.volume; }
+    else if (e.code === 'ArrowDown') { e.preventDefault(); v.volume = Math.max(0, v.volume - 0.1); var s = document.getElementById('volume-slider'); if (s) s.value = v.volume; }
     else if (e.code === 'KeyF') { toggleFullscreen(); }
     else if (e.code === 'KeyM') { toggleMute(); }
     else if (e.code === 'KeyP') { togglePiP(); }
 });
-
-// ── Persist playback position ──
-(function() {
-    var v = getVideo(); if (!v) return;
-    var key = 'pos_{{ .Filename }}';
-    var saved = parseFloat(localStorage.getItem(key) || '0');
-    if (saved > 5) {
-        v.addEventListener('loadedmetadata', function() { v.currentTime = saved; }, { once: true });
-    }
-    v.addEventListener('timeupdate', function() {
-        if (v.currentTime > 5) localStorage.setItem(key, v.currentTime);
-    });
-    v.addEventListener('ended', function() { localStorage.removeItem(key); });
-})();
 </script>
 </body>
 </html>

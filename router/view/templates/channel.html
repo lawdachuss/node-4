@@ -21,22 +21,123 @@
         })();
     </script>
     <style>
-        body { background: #09090b; color: #e4e4e7; min-height: 100dvh; }
-        .page-header { background: rgba(12,12,15,0.95); backdrop-filter: blur(16px); border-bottom: 1px solid rgba(255,255,255,0.05); position: sticky; top: 0; z-index: 50; }
+        * { box-sizing: border-box; }
+        body { background: #06060a; color: #e4e4e7; min-height: 100dvh; -webkit-font-smoothing: antialiased; }
+        .page-header {
+            background: rgba(8,8,12,0.85);
+            backdrop-filter: blur(24px) saturate(1.2);
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            position: sticky; top: 0; z-index: 50;
+        }
+
+        /* ── Video Card ── */
         .video-card {
-            background: rgba(18,18,22,0.9);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 14px; overflow: hidden;
-            transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s ease, border-color 0.2s ease;
+            background: rgba(14,14,18,0.8);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 16px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
             will-change: transform;
+            position: relative;
+        }
+        .video-card::before {
+            content: '';
+            position: absolute;
+            inset: -1px;
+            border-radius: 17px;
+            background: linear-gradient(135deg, rgba(225,29,72,0), rgba(124,58,237,0));
+            z-index: -1;
+            transition: all 0.35s ease;
+            opacity: 0;
         }
         .video-card:hover {
-            transform: translateY(-4px) scale(1.01);
-            border-color: rgba(225,29,72,0.2);
-            box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(225,29,72,0.08);
+            transform: translateY(-6px) scale(1.015);
+            border-color: transparent;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(225,29,72,0.06);
         }
-        .host-badge { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 5px; background: rgba(16,185,129,0.1); color: #34d399; border: 1px solid rgba(16,185,129,0.2); }
-        .tag-badge { font-size: 9px; font-weight: 600; padding: 2px 8px; border-radius: 20px; background: rgba(139,92,246,0.1); color: #a78bfa; border: 1px solid rgba(139,92,246,0.2); }
+        .video-card:hover::before {
+            opacity: 1;
+            background: linear-gradient(135deg, rgba(225,29,72,0.2), rgba(124,58,237,0.15));
+        }
+
+        .card-thumb { position: relative; overflow: hidden; background: #0a0a0e; aspect-ratio: 16/9; }
+        .card-thumb::after {
+            content: '';
+            position: absolute; inset: 0;
+            background: linear-gradient(to top, rgba(6,6,10,0.95) 0%, rgba(6,6,10,0.3) 35%, transparent 60%);
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+        .video-card:hover .card-thumb::after { opacity: 0; }
+        .card-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.7s cubic-bezier(0.16,1,0.3,1); }
+        .video-card:hover .card-thumb img { transform: scale(1.08); }
+
+        .sprite-overlay { position: absolute; inset: 0; overflow: hidden; opacity: 0; transition: opacity 0.4s ease; z-index: 2; }
+        .video-card:hover .sprite-overlay { opacity: 1; }
+        .sprite-slideshow { animation: sprite-scroll 8s steps(20) infinite; will-change: transform; }
+        @keyframes sprite-scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+
+        .play-btn-wrap {
+            position: absolute; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; transition: opacity 0.3s ease; z-index: 3; pointer-events: none;
+        }
+        .video-card:hover .play-btn-wrap { opacity: 1; }
+        .play-btn {
+            width: 48px; height: 48px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        .play-btn svg { width: 20px; height: 20px; color: white; margin-left: 2px; }
+
+        .card-badges {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            display: flex; align-items: flex-start; justify-content: space-between;
+            gap: 6px; pointer-events: none; z-index: 4;
+        }
+        .badge {
+            font-size: 9px; font-weight: 700; padding: 3px 8px;
+            border-radius: 6px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(8px);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .badge-res { background: linear-gradient(135deg, rgba(225,29,72,0.3), rgba(225,29,72,0.15)); border-color: rgba(225,29,72,0.2); }
+
+        .card-body { padding: 14px 16px 16px; }
+        .card-title { font-size: 13px; font-weight: 700; color: #f4f4f5; letter-spacing: -0.01em; line-height: 1.3; }
+        .card-subtitle { font-size: 10px; color: #3f3f46; font-family: 'SF Mono', 'Fira Code', monospace; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        .tag-badge {
+            font-size: 9px; font-weight: 600; padding: 3px 9px;
+            border-radius: 20px;
+            background: rgba(139,92,246,0.08);
+            color: #a78bfa;
+            border: 1px solid rgba(139,92,246,0.15);
+        }
+        .host-badge {
+            font-size: 9px; font-weight: 700; padding: 3px 9px;
+            border-radius: 6px;
+            background: rgba(16,185,129,0.1);
+            color: #34d399;
+            border: 1px solid rgba(16,185,129,0.15);
+            transition: all 0.15s;
+        }
+        .host-badge:hover { background: rgba(16,185,129,0.2); }
+        .delete-btn {
+            width: 28px; height: 28px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.05);
+            color: #52525b; cursor: pointer; transition: all 0.15s;
+        }
+        .delete-btn:hover { background: rgba(225,29,72,0.1); border-color: rgba(225,29,72,0.2); color: #f87171; }
     </style>
 </head>
 <body>
@@ -44,12 +145,12 @@
 <div class="page-header">
     <div class="max-w-screen-xl mx-auto px-5 py-3.5 flex items-center justify-between">
         <div class="flex items-center gap-3">
-            <a href="/videos" class="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all"
-               style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07)" title="Back">
+            <a href="/videos" class="w-9 h-9 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all"
+               style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)" title="Back">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             </a>
             <div class="flex items-center gap-2.5">
-                <div class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
+                <div class="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-black text-white shrink-0"
                      style="background:linear-gradient(135deg,#e11d48,#7c3aed)">
                     {{ if .Videos }}{{ slice (index .Videos 0).Username 0 1 }}{{ else }}?{{ end }}
                 </div>
@@ -59,8 +160,8 @@
                 </div>
             </div>
         </div>
-        <button onclick="toggleDarkMode()" class="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all"
-                style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07)">
+        <button onclick="toggleDarkMode()" class="w-9 h-9 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all"
+                style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
         </button>
     </div>
@@ -69,8 +170,9 @@
 <div class="max-w-screen-xl mx-auto px-5 py-8">
     {{ if not .Videos }}
     <div class="flex flex-col items-center justify-center py-40">
-        <div class="w-20 h-20 rounded-3xl flex items-center justify-center mb-5" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07)">
-            <svg class="w-9 h-9 text-zinc-700" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <div class="w-20 h-20 rounded-3xl flex items-center justify-center mb-5 relative" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04)">
+            <div class="absolute inset-[-20px] rounded-full" style="background:radial-gradient(circle,rgba(225,29,72,0.06) 0%,transparent 70%)"></div>
+            <svg class="w-9 h-9 text-zinc-700 relative z-10" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
                 <path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/>
             </svg>
         </div>
@@ -83,50 +185,50 @@
         {{ range .Videos }}
         <div class="video-card group {{ if .FullPath }}cursor-pointer{{ end }}"
              onclick="{{ if .FullPath }}window.location.href='/video?path={{ .FullPath | urlquery }}'{{ end }}">
-            <div class="relative overflow-hidden bg-zinc-950 aspect-video">
+            <div class="card-thumb">
                 {{ if and .ThumbnailURL .FullPath }}
-                <img src="{{ .ThumbnailURL }}" alt="" class="w-full h-full object-cover transition-all duration-700 {{ if .SpriteURL }}group-hover:opacity-0{{ else }}group-hover:scale-110{{ end }}" loading="lazy" />
+                <img src="{{ .ThumbnailURL }}" alt="" loading="lazy" />
                 {{ else if .ThumbnailURL }}
-                <img src="{{ .ThumbnailURL }}" alt="" class="w-full h-full object-cover" loading="lazy" />
+                <img src="{{ .ThumbnailURL }}" alt="" loading="lazy" />
                 {{ end }}
                 {{ if .SpriteURL }}
-                <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 sprite-slideshow"
-                     style="background-image:url('{{ .SpriteURL }}');background-size:1000% 100%;background-repeat:no-repeat;background-position:0% 0%;"></div>
+                <div class="sprite-overlay">
+                    <div class="sprite-slideshow" style="width:2000%;height:100%;background-image:url('{{ .SpriteURL }}');background-size:100% 100%;background-repeat:no-repeat;"></div>
+                </div>
                 {{ end }}
                 {{ if not .ThumbnailURL }}
-                <div class="w-full h-full flex items-center justify-center" style="background:#0c0c0f">
+                <div class="w-full h-full flex items-center justify-center" style="background:#0a0a0e">
                     <svg class="w-10 h-10 text-zinc-800" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
                         <path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/>
                     </svg>
                 </div>
                 {{ end }}
-                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none"></div>
                 {{ if .FullPath }}
-                <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none">
-                    <div class="w-12 h-12 rounded-full flex items-center justify-center" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.2)">
-                        <svg class="w-5 h-5 text-white" style="margin-left:2px" fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21"/></svg>
+                <div class="play-btn-wrap">
+                    <div class="play-btn">
+                        <svg fill="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21"/></svg>
                     </div>
                 </div>
                 {{ end }}
-                <div class="absolute top-2 left-2 right-2 flex justify-between gap-1 pointer-events-none">
-                    <div class="flex gap-1">
-                        {{ if .Resolution }}<span class="px-1.5 py-0.5 text-[9px] font-bold rounded text-white" style="background:rgba(0,0,0,0.65);backdrop-filter:blur(4px)">{{ .Resolution }}</span>{{ end }}
-                        {{ if gt .Framerate 0 }}<span class="px-1.5 py-0.5 text-[9px] font-bold rounded text-white" style="background:rgba(0,0,0,0.65);backdrop-filter:blur(4px)">{{ .Framerate }}fps</span>{{ end }}
+                <div class="card-badges">
+                    <div class="flex flex-wrap gap-1">
+                        {{ if .Resolution }}<span class="badge badge-res">{{ .Resolution }}</span>{{ end }}
+                        {{ if gt .Framerate 0 }}<span class="badge">{{ .Framerate }}fps</span>{{ end }}
                     </div>
-                    <span class="px-1.5 py-0.5 text-[9px] font-semibold rounded text-white" style="background:rgba(0,0,0,0.65);backdrop-filter:blur(4px)">{{ .Size }}</span>
+                    <span class="badge">{{ .Size }}</span>
                 </div>
             </div>
-            <div style="padding:12px 14px 14px">
-                <div class="flex items-start justify-between gap-2 mb-1">
-                    <span class="text-[13px] font-semibold text-zinc-100">{{ .Username }}</span>
-                    <span class="text-[10px] text-zinc-600 tabular-nums shrink-0 mt-px">{{ .ModTime }}</span>
+            <div class="card-body">
+                <div class="flex items-start justify-between gap-2">
+                    <span class="card-title">{{ .Username }}</span>
+                    <span class="text-[10px] text-zinc-600 tabular-nums shrink-0 mt-0.5">{{ .ModTime }}</span>
                 </div>
-                <div class="text-[10px] text-zinc-700 truncate font-mono" title="{{ .Filename }}">{{ .Filename }}</div>
+                <div class="card-subtitle" title="{{ .Filename }}">{{ .Filename }}</div>
                 {{ if .Tags }}
-                <div class="flex flex-wrap gap-1 mt-2">{{ range .Tags }}<span class="tag-badge">{{ . }}</span>{{ end }}</div>
+                <div class="flex flex-wrap gap-1 mt-2.5">{{ range .Tags }}<span class="tag-badge">{{ . }}</span>{{ end }}</div>
                 {{ end }}
                 {{ if or .Links (and .FullPath (not .IsOutputDir)) }}
-                <div class="flex items-center gap-1.5 mt-3 pt-2.5" style="border-top:1px solid rgba(255,255,255,0.05)">
+                <div class="flex items-center gap-1.5 mt-3 pt-3" style="border-top:1px solid rgba(255,255,255,0.04)">
                     {{ range $host, $link := .Links }}
                     <a href="{{ $link }}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="host-badge">{{ $host }}</a>
                     {{ end }}
@@ -134,7 +236,7 @@
                     <div class="ml-auto">
                         <form action="/delete_video" method="POST" onsubmit="return confirm('Delete {{ .Filename | js }}?')" onclick="event.stopPropagation()">
                             <input type="hidden" name="path" value="{{ .FullPath }}" />
-                            <button type="submit" class="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-700 hover:text-rose-400 transition-colors" style="background:rgba(255,255,255,0.03)">
+                            <button type="submit" class="delete-btn">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                             </button>
                         </form>

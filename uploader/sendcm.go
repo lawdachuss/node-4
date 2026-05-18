@@ -1,7 +1,6 @@
 package uploader
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,15 +26,19 @@ func NewSendCMUploader(apiKey string) *SendCMUploader {
 	return &SendCMUploader{
 		apiKey: apiKey,
 		client: &http.Client{
-			Timeout: 60 * time.Minute, // Increased timeout for large files
+			Timeout: 120 * time.Minute, // Extended timeout for large files
 			Transport: &http.Transport{
-				MaxIdleConns:          100,
-				MaxIdleConnsPerHost:   100,
+				MaxIdleConns:          10,
+				MaxIdleConnsPerHost:   2,
 				IdleConnTimeout:       90 * time.Second,
 				DisableCompression:    true,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ResponseHeaderTimeout: 30 * time.Second,
+				TLSHandshakeTimeout:   30 * time.Second,
+				ResponseHeaderTimeout: 120 * time.Second, // Increased for large uploads
 				ExpectContinueTimeout: 1 * time.Second,
+				DisableKeepAlives:     true, // Disable keep-alive to prevent stale connections
+				WriteBufferSize:       64 * 1024, // 64KB write buffer for better throughput
+				ReadBufferSize:        64 * 1024, // 64KB read buffer
+				ForceAttemptHTTP2:     false, // Stick to HTTP/1.1 for better compatibility
 			},
 		},
 	}
@@ -58,16 +61,17 @@ type sendcmUploadResponse []sendcmUploadResponseItem
 func (u *SendCMUploader) Upload(filePath string) (string, error) {
 	var lastErr error
 
-	maxAttempts := 3
+	maxAttempts := 5 // Increased from 3 to 5 attempts
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
+			// Exponential backoff: 5s, 10s, 20s, 40s
 			backoff := time.Duration((1<<uint(attempt-2))*5) * time.Second
 			time.Sleep(backoff)
 		}
 
 		downloadLink, err := u.uploadFile(filePath)
 		if err != nil {
-			lastErr = fmt.Errorf("upload file: %w", err)
+			lastErr = fmt.Errorf("upload file (attempt %d/%d): %w", attempt, maxAttempts, err)
 			if attempt < maxAttempts {
 				continue
 			}
@@ -139,39 +143,62 @@ func (u *SendCMUploader) uploadFile(filePath string) (string, error) {
 	}
 	fileSize := fileInfo.Size()
 
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
+	// Use a pipe to stream the multipart data directly without buffering
+	pipeReader, pipeWriter := io.Pipe()
+	writer := multipart.NewWriter(pipeWriter)
 
-	if u.apiKey != "" {
-		if err := writer.WriteField("key", u.apiKey); err != nil {
-			return "", fmt.Errorf("write key field: %w", err)
+	// Channel to capture errors from the goroutine
+	errChan := make(chan error, 1)
+
+	// Write multipart data in a goroutine
+	go func() {
+		defer pipeWriter.Close()
+		defer writer.Close()
+
+		if u.apiKey != "" {
+			if err := writer.WriteField("key", u.apiKey); err != nil {
+				errChan <- fmt.Errorf("write key field: %w", err)
+				pipeWriter.CloseWithError(err)
+				return
+			}
 		}
-	}
 
-	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
-	if err != nil {
-		return "", fmt.Errorf("create form file: %w", err)
-	}
+		part, err := writer.CreateFormFile("file", filepath.Base(filePath))
+		if err != nil {
+			errChan <- fmt.Errorf("create form file: %w", err)
+			pipeWriter.CloseWithError(err)
+			return
+		}
 
-	if _, err := io.Copy(part, file); err != nil {
-		return "", fmt.Errorf("copy file: %w", err)
-	}
+		if _, err := io.Copy(part, file); err != nil {
+			errChan <- fmt.Errorf("copy file: %w", err)
+			pipeWriter.CloseWithError(err)
+			return
+		}
+		
+		errChan <- nil
+	}()
 
-	if err := writer.Close(); err != nil {
-		return "", fmt.Errorf("close writer: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", uploadServer, body)
+	req, err := http.NewRequest("POST", uploadServer, pipeReader)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.ContentLength = int64(body.Len())
+	req.Header.Set("Connection", "close") // Force connection close after request
+	// Don't set Content-Length for streaming uploads - let it be chunked transfer encoding
 
 	resp, err := u.client.Do(req)
 	if err != nil {
+		// Check if there was an error in the goroutine
+		select {
+		case goroutineErr := <-errChan:
+			if goroutineErr != nil {
+				return "", fmt.Errorf("multipart write error: %w (request error: %v)", goroutineErr, err)
+			}
+		default:
+		}
 		// Provide more context about the error
 		return "", fmt.Errorf("do request (file size: %d bytes, server: %s): %w", fileSize, uploadServer, err)
 	}

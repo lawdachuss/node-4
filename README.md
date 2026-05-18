@@ -318,7 +318,7 @@ npm ci && npm run build:css
 go run . --port 8080
 ```
 
-Useful scripts: `scripts/diagnose-recording.ps1`, `scripts/fix-cloudflare-local.ps1`, `scripts/uploader_daemon.py`.
+Useful scripts: `scripts/diagnose-recording.ps1`, `scripts/fix-cloudflare-local.ps1`.
 
 ---
 

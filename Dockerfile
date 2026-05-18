@@ -8,6 +8,8 @@ RUN npm run build:css
 
 FROM golang:1.23-alpine AS builder
 WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
 COPY ./ ./
 COPY --from=css-builder /workspace/router/view/templates/styles/app.css router/view/templates/styles/app.css
 RUN go build -o chaturbate-dvr .

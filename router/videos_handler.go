@@ -2,7 +2,6 @@ package router
 
 import (
         "encoding/json"
-        "fmt"
         "net/http"
         "os"
         "path/filepath"
@@ -204,18 +203,6 @@ func loadRecordings() *RecordingsDB {
 	return &db
 }
 
-func saveRecordings(db *RecordingsDB) {
-	data, err := json.MarshalIndent(db, "", "  ")
-	if err != nil {
-		return
-	}
-
-	// Save to Supabase
-	if err := server.SaveRecordingsToDB(data); err != nil {
-		fmt.Printf("[WARN] [db] could not save recordings to Supabase: %v\n", err)
-	}
-}
-
 func walkDir(dir string) []*VideoEntry {
 	var entries []*VideoEntry
 
@@ -259,25 +246,8 @@ func walkDir(dir string) []*VideoEntry {
 			isOutput = strings.HasPrefix(absPath, absOut)
 		}
 
-		thumbURL := ""
-		if d, e := os.ReadFile(full + ".thumb"); e == nil {
-			thumbURL = strings.TrimSpace(string(d))
-		}
-		spriteURL := ""
-		if d, e := os.ReadFile(full + ".sprite"); e == nil {
-			spriteURL = strings.TrimSpace(string(d))
-		}
-
-		// Fall back to preview_links table if sidecars don't exist
-		if thumbURL == "" || spriteURL == "" {
-			dbThumb, dbSprite := server.LoadPreviewLinks(item.Name())
-			if thumbURL == "" && dbThumb != "" {
-				thumbURL = dbThumb
-			}
-			if spriteURL == "" && dbSprite != "" {
-				spriteURL = dbSprite
-			}
-		}
+		// Load preview URLs from Supabase
+		thumbURL, spriteURL := server.LoadPreviewLinks(item.Name())
 
 		entries = append(entries, &VideoEntry{
 			Username:     username,

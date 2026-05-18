@@ -15,6 +15,13 @@ import (
 	"github.com/teacat/chaturbate-dvr/server"
 )
 
+// pendingFile tracks a closed recording file awaiting post-processing
+// (mux, move to output dir, thumbnail, upload, DB save, deletion).
+type pendingFile struct {
+	videoPath string
+	audioPath string // empty if no separate audio
+}
+
 // Channel represents a channel instance.
 type Channel struct {
 	CancelFunc      context.CancelFunc
@@ -47,6 +54,8 @@ type Channel struct {
 	HasSeparateAudio bool
 	switchRequested  bool       // set by HandleSegment, consumed by OnPollComplete
 	cleanupMu        sync.Mutex // serialises Cleanup() calls from concurrent goroutines
+	pendingFiles     []pendingFile
+	UploadWg         sync.WaitGroup // tracks in-flight upload goroutines for graceful shutdown
 }
 
 // New creates a new channel instance with the given manager and configuration.
@@ -151,7 +160,7 @@ func (ch *Channel) Pause() {
 	// Finalize any in-progress files immediately so they can be uploaded
 	// and removed when `DeleteLocalAfterUpload` is enabled.
 	go func() {
-		if err := ch.Cleanup(); err != nil {
+		if err := ch.Cleanup(false); err != nil {
 			ch.Error("cleanup on pause: %s", err.Error())
 		}
 	}()

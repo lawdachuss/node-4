@@ -6,7 +6,9 @@
 .env.*
 
 videos
-database
+database/.gitkeep
+database/*.db
+database/*.sqlite
 conf
 emergency-backup
 

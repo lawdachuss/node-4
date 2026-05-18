@@ -19,4 +19,5 @@ type IManager interface {
         LoadConfig() error
         SaveConfig() error
         StartCookieRefresher()
+        WaitForUploads()
 }

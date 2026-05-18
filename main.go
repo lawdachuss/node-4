@@ -4,6 +4,8 @@ import (
         "fmt"
         "log"
         "os"
+        "os/signal"
+        "syscall"
 
         "github.com/teacat/chaturbate-dvr/config"
         "github.com/teacat/chaturbate-dvr/entity"
@@ -238,6 +240,18 @@ func start(c *cli.Context) error {
                 // cookie-refresher container). It calls Byparr every 30 min to obtain
                 // fresh cf_clearance cookies automatically.
                 server.Manager.StartCookieRefresher()
+
+                // Graceful shutdown: catch SIGTERM/SIGINT and wait for in-flight
+                // uploads to finish before exiting so recordings are not lost.
+                go func() {
+                        sigCh := make(chan os.Signal, 1)
+                        signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+                        <-sigCh
+                        fmt.Println("\n shutting down — waiting for in-flight uploads to finish...")
+                        server.Manager.WaitForUploads()
+                        fmt.Println(" all uploads completed, exiting")
+                        os.Exit(0)
+                }()
 
                 return router.SetupRouter().Run(":" + c.String("port"))
         }

@@ -54,7 +54,7 @@ func (ch *Channel) Monitor() {
                                 // it so post-processing (thumbnail, upload, DB save, deletion) can run.
                                 if errors.Is(err, internal.ErrChannelOffline) && ch.File != nil {
                                         go func() {
-                                                if cerr := ch.Cleanup(); cerr != nil {
+                                                if cerr := ch.Cleanup(false); cerr != nil {
                                                         ch.Error("cleanup on offline: %s", cerr.Error())
                                                 }
                                         }()
@@ -86,7 +86,7 @@ func (ch *Channel) Monitor() {
         }
 
         // Always cleanup when monitor exits, regardless of error
-        if err := ch.Cleanup(); err != nil {
+        if err := ch.Cleanup(false); err != nil {
                 ch.Error("cleanup on monitor exit: %s", err.Error())
         }
 
@@ -136,7 +136,7 @@ func (ch *Channel) RecordStream(ctx context.Context, client *chaturbate.Client) 
 
 	// Ensure file is cleaned up when this function exits in any case
 	defer func() {
-		if err := ch.Cleanup(); err != nil {
+		if err := ch.Cleanup(false); err != nil {
 			ch.Error("cleanup on record stream exit: %s", err.Error())
 		}
 	}()

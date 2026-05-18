@@ -236,25 +236,19 @@ select {
 .log-line.log-filtered { display: none; }
 
 /* ── Sprite sheet slideshow ── */
-.sprite-slideshow { animation: sprite-scroll 1.5s step-end infinite; animation-play-state: paused; }
+.sprite-slideshow { animation: sprite-scroll 8s steps(20) infinite; will-change: transform; }
 .group:hover .sprite-slideshow { animation-play-state: running; }
-@keyframes sprite-scroll {
-  0%   { background-position: 0% 0%; }   10%  { background-position: 11.11% 0%; }
-  20%  { background-position: 22.22% 0%; } 30%  { background-position: 33.33% 0%; }
-  40%  { background-position: 44.44% 0%; } 50%  { background-position: 55.56% 0%; }
-  60%  { background-position: 66.67% 0%; } 70%  { background-position: 77.78% 0%; }
-  80%  { background-position: 88.89% 0%; } 90%  { background-position: 100% 0%; }
-  100% { background-position: 0% 0%; }
-}
+@keyframes sprite-scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
 
 /* ── Video card ── */
 .video-card {
-  transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s ease, border-color 0.2s ease;
+  transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s ease, border-color 0.2s ease, background-color 0.2s ease;
   will-change: transform;
 }
 .video-card:hover {
   transform: translateY(-4px) scale(1.005);
   box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px rgba(225,29,72,0.1);
+  background-color: rgba(24,24,28,0.95) !important;
 }
 
 /* ── Thin scrollbar (global) ── */
