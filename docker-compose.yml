@@ -97,11 +97,7 @@
       - ./scripts/cookie-refresher.sh:/cookie-refresher.sh:ro
     command: ["sh", "/cookie-refresher.sh"]
     depends_on:
-      byparr:
-        condition: service_started
       byparr-lb:
-        condition: service_started
-      chaturbate-dvr:
         condition: service_started
     networks:
       - recorder-network
