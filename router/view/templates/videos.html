@@ -90,7 +90,6 @@
             background: linear-gradient(to top, rgba(6,6,10,0.95) 0%, rgba(6,6,10,0.3) 35%, transparent 60%);
             pointer-events: none;
             z-index: 1;
-            transition: opacity 0.3s;
         }
         .video-card:hover .card-thumb::after {
             opacity: 0;
@@ -108,10 +107,8 @@
         }
         .video-card:hover .sprite-overlay { opacity: 1; }
         .sprite-slideshow {
-            animation: sprite-scroll 8s steps(20) infinite;
-            will-change: transform;
+            width: 100%; height: 100%;
         }
-        @keyframes sprite-scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
 
         /* ── Play button ── */
         .play-btn-wrap {
@@ -328,7 +325,7 @@
 
                     {{ if .SpriteURL }}
                     <div class="sprite-overlay">
-                        <div class="sprite-slideshow" style="width:2000%;height:100%;background-image:url('{{ .SpriteURL }}');background-size:100% 100%;background-repeat:no-repeat;"></div>
+                        <div class="sprite-slideshow" style="width:100%;height:100%;background-image:url('{{ .SpriteURL }}');background-size:cover;background-position:center;"></div>
                     </div>
                     {{ end }}
 
