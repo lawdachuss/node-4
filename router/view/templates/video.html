@@ -35,7 +35,6 @@
         /* ── Header ── */
         .page-header {
             background: var(--bg-surface-alt);
-            backdrop-filter: blur(24px) saturate(1.2);
             border-bottom: 1px solid var(--border-subtle);
             position: sticky; top: 0; z-index: 50;
         }
@@ -301,6 +300,7 @@
         .server-option .server-opt-dot.online { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.4); }
         .server-option .server-opt-dot.embed { background: #3b82f6; box-shadow: 0 0 6px rgba(59,130,246,0.4); }
         .server-option .server-opt-dot.local { background: #d4a053; box-shadow: 0 0 6px rgba(212,160,83,0.4); }
+        .server-option .server-opt-dot.external { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.4); }
         .server-option .server-opt-info { flex: 1; min-width: 0; }
         .server-option .server-opt-name {
             font-size: 12px; font-weight: 600; color: #e4e4e7;
@@ -507,6 +507,40 @@
             opacity: 0; transition: opacity 0.2s;
             pointer-events: none;
         }
+
+        /* ── Light mode ── */
+        html:not(.dark) body { background: #f4f4f5; color: #18181b; }
+        html:not(.dark) .page-header { background: #ffffff !important; border-bottom: 1px solid #e4e4e7; }
+        html:not(.dark) .header-btn { background: rgba(0,0,0,0.04) !important; border-color: #e4e4e7 !important; color: #52525b; }
+        html:not(.dark) .header-btn:hover { background: rgba(0,0,0,0.08) !important; color: #18181b; }
+        html:not(.dark) .player-wrapper { background: #111; }
+        html:not(.dark) .meta-card { background: #ffffff; border-color: rgba(212,160,83,0.12); box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        html:not(.dark) .meta-top { border-bottom-color: #e4e4e7; }
+        html:not(.dark) .meta-cell { background: #f4f4f5; }
+        html:not(.dark) .meta-label { color: #71717a; }
+        html:not(.dark) .meta-value { color: #18181b; }
+        html:not(.dark) .action-btn-ghost { background: #f4f4f5; border-color: #e4e4e7; color: #52525b; }
+        html:not(.dark) .action-btn-ghost:hover { background: #e4e4e7; color: #18181b; }
+        html:not(.dark) .host-link { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.2); color: #059669; }
+        html:not(.dark) .host-link:hover { background: rgba(16,185,129,0.15); }
+        html:not(.dark) .tag-badge { background: rgba(139,92,246,0.1); color: #7c3aed; border-color: rgba(139,92,246,0.2); }
+        html:not(.dark) .related-card { background: #ffffff; border-color: #e4e4e7; }
+        html:not(.dark) .related-card:hover { background: #f9fafb; border-color: rgba(212,160,83,0.25); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+        html:not(.dark) .related-title { color: #18181b; }
+        html:not(.dark) .related-meta { color: #71717a; }
+        html:not(.dark) .upload-placeholder { background: rgba(16,185,129,0.04); border-color: rgba(16,185,129,0.12); }
+        html:not(.dark) .server-btn { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.1); color: #18181b; }
+        html:not(.dark) .server-dropdown { background: #ffffff; border-color: #e4e4e7; box-shadow: 0 8px 32px rgba(0,0,0,0.12); }
+        html:not(.dark) .server-dropdown-header { color: #9ca3af; border-bottom-color: #e4e4e7; }
+        html:not(.dark) .server-opt-name { color: #18181b !important; }
+        html:not(.dark) .server-opt-type { color: #71717a !important; }
+        html:not(.dark) .server-option:hover { background: #f4f4f5; }
+        html:not(.dark) .server-option.active { background: rgba(212,160,83,0.08); }
+        html:not(.dark) .custom-controls { background: rgba(255,255,255,0.92); border-top-color: rgba(0,0,0,0.06); }
+        html:not(.dark) .ctrl-btn { color: #52525b; }
+        html:not(.dark) .ctrl-btn:hover { color: #18181b; background: rgba(0,0,0,0.06); }
+        html:not(.dark) .time-display { color: #52525b; }
+        html:not(.dark) .speed-select { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.1); color: #18181b; }
     </style>
 </head>
 <body data-video-page="{{ or .FullPath .VideoURL .EmbedURL }}">
@@ -660,15 +694,13 @@
                             </button>
                             {{ end }}
                             {{ range .HostPlayers }}
-                            {{ if or .EmbedURL .VideoURL }}
                             <button class="server-option" data-server="{{ .Host }}" onclick="switchServer('{{ .Host }}')">
-                                <span class="server-opt-dot {{ if .VideoURL }}online{{ else }}embed{{ end }}"></span>
+                                <span class="server-opt-dot {{ if .VideoURL }}online{{ else if .EmbedURL }}embed{{ else }}external{{ end }}"></span>
                                 <div class="server-opt-info">
                                     <div class="server-opt-name">{{ .Host }}</div>
-                                    <div class="server-opt-type">{{ if .VideoURL }}Direct stream{{ else }}Embed{{ end }}</div>
+                                    <div class="server-opt-type">{{ if .VideoURL }}Direct stream{{ else if .EmbedURL }}Embed{{ else }}External link{{ end }}</div>
                                 </div>
                             </button>
-                            {{ end }}
                             {{ end }}
                         </div>
                     </div>
@@ -751,15 +783,13 @@
                         <div class="server-dropdown" id="server-dropdown">
                             <div class="server-dropdown-header">Servers</div>
                             {{ range .HostPlayers }}
-                            {{ if or .EmbedURL .VideoURL }}
                             <button class="server-option" data-server="{{ .Host }}" onclick="switchServer('{{ .Host }}')">
-                                <span class="server-opt-dot {{ if .VideoURL }}online{{ else }}embed{{ end }}"></span>
+                                <span class="server-opt-dot {{ if .VideoURL }}online{{ else if .EmbedURL }}embed{{ else }}external{{ end }}"></span>
                                 <div class="server-opt-info">
                                     <div class="server-opt-name">{{ .Host }}</div>
-                                    <div class="server-opt-type">{{ if .VideoURL }}Direct stream{{ else }}Embed{{ end }}</div>
+                                    <div class="server-opt-type">{{ if .VideoURL }}Direct stream{{ else if .EmbedURL }}Embed{{ else }}External link{{ end }}</div>
                                 </div>
                             </button>
-                            {{ end }}
                             {{ end }}
                         </div>
                     </div>
@@ -908,7 +938,7 @@
     </div>
     <div class="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {{ range .Related }}
-        <div class="related-card group" onclick="window.location.href='/video?path={{ .FullPath | urlquery }}'">
+        <div class="related-card group" onclick="window.location.href='/video?path={{ if .FullPath }}{{ .FullPath | urlquery }}{{ else }}{{ .Filename | urlquery }}{{ end }}'">
             <div class="related-thumb shrink-0">
                 {{ if .ThumbnailURL }}
                 <img src="{{ .ThumbnailURL }}" alt="" loading="lazy" />
@@ -934,30 +964,59 @@
 
 </div><!-- /page-content -->
 
-<script type="application/json" id="host-players-data">{{ .HostPlayersJSON }}</script>
 <script>
 // ── Host players ──
-var hostPlayers = JSON.parse(document.getElementById('host-players-data').textContent);
+var hostPlayers = ({{ .HostPlayersJSON }}) || [];
+
+function getOrCreatePlayerSection() {
+    var ps = document.getElementById('player-section');
+    if (ps) return ps;
+    // For uploaded-only videos with no local player, create the section on the fly
+    ps = document.createElement('div');
+    ps.id = 'player-section';
+    ps.className = 'mb-1 relative';
+    ps.style.zIndex = '1';
+    var metaCard = document.querySelector('.meta-card');
+    if (metaCard) {
+        metaCard.parentNode.insertBefore(ps, metaCard);
+    } else {
+        var main = document.querySelector('main') || document.body;
+        main.prepend(ps);
+    }
+    // Remove the upload placeholder if it exists
+    var ph = document.querySelector('.upload-placeholder');
+    if (ph) ph.style.display = 'none';
+    return ps;
+}
 
 function embedHost(hostName) {
     var player = hostPlayers.find(function(p) { return p.host === hostName; });
     if (!player) return false;
+    // Update active state in all server dropdowns
+    document.querySelectorAll('.server-option').forEach(function(opt) {
+        opt.classList.toggle('active', opt.dataset.server === hostName);
+    });
+    var nameEl = document.getElementById('current-server-name');
+    if (nameEl) nameEl.textContent = hostName;
     if (player.embedUrl) {
-        var ps = document.getElementById('player-section');
-        if (!ps) return false;
+        var ps = getOrCreatePlayerSection();
         ps.innerHTML = '<div class="player-wrapper" style="padding-top:56.25%"><iframe src="' + player.embedUrl + '" allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%" scrolling="no" frameborder="0" referrerpolicy="origin-when-cross-origin"></iframe></div>';
         saveLastHost(hostName);
+        ps.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return true;
     }
     if (player.videoUrl) {
-        var ps = document.getElementById('player-section');
-        if (!ps) return false;
+        var ps = getOrCreatePlayerSection();
         ps.innerHTML = buildVideoPlayerHTML(player.videoUrl);
         saveLastHost(hostName);
         initCustomControls();
+        ps.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return true;
     }
-    window.open(player.link, '_blank');
+    // GoFile and other external-only links — open in new tab
+    if (player.link) {
+        window.open(player.link, '_blank');
+    }
     return false;
 }
 

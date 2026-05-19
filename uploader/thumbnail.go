@@ -21,10 +21,10 @@ client *http.Client
 
 // pixhostResponse is the JSON response from the Pixhost.to API
 type pixhostResponse struct {
-	Name    string `json:"name"`
-	ShowURL string `json:"show_url"`
-	ThURL   string `json:"th_url"`
-	ImgURL  string `json:"img_url"` // Direct image URL (may be empty for NSFW)
+        Name    string `json:"name"`
+        ShowURL string `json:"show_url"`
+        ThURL   string `json:"th_url"`
+        ImgURL  string `json:"img_url"` // Direct image URL (may be empty for NSFW)
 }
 
 // NewThumbnailUploader creates a new Pixhost.to thumbnail uploader.
@@ -97,15 +97,15 @@ req.Header.Set("Accept", "application/json")
 
 resp, err := t.client.Do(req)
 if err != nil {
-	pr.CloseWithError(err) // unblock the writer goroutine
-	<-errCh               // drain to avoid goroutine leak
-	return "", fmt.Errorf("send request: %w", err)
+        pr.CloseWithError(err) // unblock the writer goroutine
+        <-errCh               // drain to avoid goroutine leak
+        return "", fmt.Errorf("send request: %w", err)
 }
 defer resp.Body.Close()
 
 // Wait for the writer goroutine to finish
 if werr := <-errCh; werr != nil {
-	return "", werr
+        return "", werr
 }
 
 body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10MB limit
@@ -122,21 +122,23 @@ if err := json.Unmarshal(body, &result); err != nil {
 return "", fmt.Errorf("decode response: %w", err)
 }
 
-// Prefer direct image URL (img_url). If empty (common for NSFW),
-// derive it from show_url by replacing /show/ with /images/.
-// Fall back to th_url only as a last resort (it's a tiny server thumbnail).
+// Prefer direct image URL (img_url). For NSFW content img_url is always
+// empty and pixhost.to/images/... requires an age-gate cookie in the
+// browser, so use th_url (CDN thumbnail, no cookie needed) as the
+// primary fallback. Fall back to the derived /images/ URL only as a
+// last resort.
 imageURL := strings.TrimSpace(result.ImgURL)
+if imageURL == "" {
+        imageURL = strings.TrimSpace(result.ThURL)
+}
 if imageURL == "" && strings.Contains(result.ShowURL, "/show/") {
-	imageURL = strings.Replace(result.ShowURL, "/show/", "/images/", 1)
+        imageURL = strings.Replace(result.ShowURL, "/show/", "/images/", 1)
 }
 if imageURL == "" {
-	imageURL = strings.TrimSpace(result.ThURL)
-}
-if imageURL == "" {
-	return "", fmt.Errorf("Pixhost returned no image URL (response: %s)", string(body))
+        return "", fmt.Errorf("Pixhost returned no image URL (response: %s)", string(body))
 }
 log.Printf("Pixhost response: img_url=%q show_url=%q th_url=%q → using %q",
-	result.ImgURL, result.ShowURL, result.ThURL, imageURL)
+        result.ImgURL, result.ShowURL, result.ThURL, imageURL)
 
 log.Printf("Thumbnail uploaded to Pixhost: %s", imageURL)
 return imageURL, nil

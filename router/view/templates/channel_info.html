@@ -10,7 +10,7 @@
   </button>
 
   <!-- Thumbnail -->
-  <div class="mb-4 rounded-xl overflow-hidden aspect-video relative group" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)">
+  <div class="mb-4 rounded-xl overflow-hidden aspect-video relative group thumb-wrap">
     <img src="https://thumb.live.mmcdn.com/ri/{{ .Username }}.jpg"
          alt="{{ .Username }}"
          class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
@@ -49,7 +49,7 @@
     {{ end }}
   </div>
 
-  <div class="mt-4 mb-4" style="height:1px;background:rgba(255,255,255,0.06)"></div>
+  <div class="mt-4 mb-4 info-divider" style="height:1px"></div>
 
   <!-- Info rows -->
   <div class="space-y-3.5">
@@ -106,7 +106,7 @@
 
   </div>
 
-  <div class="mt-5" style="height:1px;background:rgba(255,255,255,0.06)"></div>
+  <div class="mt-5 info-divider" style="height:1px"></div>
 
   <!-- Action buttons -->
   <div class="grid grid-cols-2 gap-2 mt-4">
@@ -119,10 +119,7 @@
         Resume
       </button>
       {{ else }}
-      <button class="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium rounded-xl transition-all text-zinc-400 hover:text-zinc-200"
-              style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)"
-              onmouseenter="this.style.background='rgba(255,255,255,0.07)'"
-              onmouseleave="this.style.background='rgba(255,255,255,0.04)'"
+      <button class="info-btn w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium rounded-xl transition-all text-zinc-400 hover:text-zinc-200"
               hx-post="/pause_channel/{{ .Username }}" hx-swap="none">
         <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
@@ -133,10 +130,8 @@
     </div>
     <div>
       <form action="/stop_channel/{{ .Username }}" method="POST" onsubmit="return confirm('Delete channel \`{{ .Username }}\`?')">
-        <button type="submit" class="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium rounded-xl transition-all text-amber-500 hover:text-amber-300"
-                style="background:rgba(212,160,83,0.06);border:1px solid rgba(212,160,83,0.15)"
-                onmouseenter="this.style.background='rgba(212,160,83,0.1)'"
-                onmouseleave="this.style.background='rgba(212,160,83,0.06)'">
+        <button type="submit" class="info-btn-delete w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium rounded-xl transition-all text-amber-500 hover:text-amber-300"
+>
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
           </svg>

@@ -44,21 +44,21 @@ func New() (*Manager, error) {
 
 // SaveConfig saves the current channels to Supabase.
 func (m *Manager) SaveConfig() error {
-	var config []*entity.ChannelConfig
+        var config []*entity.ChannelConfig
 
-	m.Channels.Range(func(key, value any) bool {
-		config = append(config, value.(*channel.Channel).Config)
-		return true
-	})
+        m.Channels.Range(func(key, value any) bool {
+                config = append(config, value.(*channel.Channel).Config)
+                return true
+        })
 
-	b, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	if err := server.SaveChannelsToDB(b); err != nil {
-		return fmt.Errorf("save channels to database: %w", err)
-	}
-	return nil
+        b, err := json.MarshalIndent(config, "", "  ")
+        if err != nil {
+                return fmt.Errorf("marshal: %w", err)
+        }
+        if err := server.SaveChannelsToDB(b); err != nil {
+                return fmt.Errorf("save channels to database: %w", err)
+        }
+        return nil
 }
 
 // StartCookieRefresher launches a background goroutine that calls
@@ -96,11 +96,11 @@ func (m *Manager) refreshCookiesOnce() bool {
                 return false
         }
 
-	server.UpdateByparrCredentials(cookies, userAgent)
-	if err := server.SaveSettings(); err != nil {
-		fmt.Printf("[WARN] [cookie-refresher] could not persist cookies: %v\n", err)
-		return false
-	}
+        server.UpdateByparrCredentials(cookies, userAgent)
+        if err := server.SaveSettings(); err != nil {
+                fmt.Printf("[WARN] [cookie-refresher] could not persist cookies: %v\n", err)
+                return false
+        }
         fmt.Println(" INFO [cookie-refresher] cookies refreshed and saved — recording will resume shortly")
         return true
 }
@@ -108,53 +108,53 @@ func (m *Manager) refreshCookiesOnce() bool {
 // LoadConfig loads the channels from Supabase and starts them.
 // All channels are automatically resumed on startup, regardless of their paused state.
 func (m *Manager) LoadConfig() error {
-	// Restore persisted cookies/user-agent before starting channels
-	if err := server.LoadSettings(); err != nil {
-		fmt.Printf("[WARN] could not load settings: %v\n", err)
-	}
+        // Restore persisted cookies/user-agent before starting channels
+        if err := server.LoadSettings(); err != nil {
+                fmt.Printf("[WARN] could not load settings: %v\n", err)
+        }
 
-	// Load channels from Supabase
-	b := server.LoadChannelsFromDB()
-	if b == nil {
-		return nil
-	}
+        // Load channels from Supabase
+        b := server.LoadChannelsFromDB()
+        if b == nil {
+                return nil
+        }
 
-	var config []*entity.ChannelConfig
-	if err := json.Unmarshal(b, &config); err != nil {
-		return fmt.Errorf("unmarshal: %w", err)
-	}
+        var config []*entity.ChannelConfig
+        if err := json.Unmarshal(b, &config); err != nil {
+                return fmt.Errorf("unmarshal: %w", err)
+        }
 
-	if len(config) == 0 {
-		return nil
-	}
+        if len(config) == 0 {
+                return nil
+        }
 
-	seq := 0
-	for _, conf := range config {
-		ch := channel.New(conf)
-		m.Channels.Store(conf.Username, ch)
+        seq := 0
+        for _, conf := range config {
+                ch := channel.New(conf)
+                m.Channels.Store(conf.Username, ch)
 
-		// Automatically resume all channels on startup
-		if ch.Config.IsPaused.Load() {
-			ch.Info("channel was paused, automatically resuming on startup")
-			ch.Config.IsPaused.Store(false)
-		}
-		go ch.Resume(seq)
-		seq++
-	}
+                // Automatically resume all channels on startup
+                if ch.Config.IsPaused.Load() {
+                        ch.Info("channel was paused, automatically resuming on startup")
+                        ch.Config.IsPaused.Store(false)
+                }
+                go ch.Resume(seq)
+                seq++
+        }
 
-	// Save the updated config to persist the resumed state.
-	// This is best-effort — if Supabase is down, the web UI should still start
-	// and channels will save their state on the next config change.
-	if err := m.SaveConfig(); err != nil {
-		fmt.Printf("[WARN] could not persist channel state to Supabase: %v\n", err)
-		fmt.Println("[WARN] channels are running but state changes will be lost if the container restarts")
-	}
+        // Save the updated config to persist the resumed state.
+        // This is best-effort — if Supabase is down, the web UI should still start
+        // and channels will save their state on the next config change.
+        if err := m.SaveConfig(); err != nil {
+                fmt.Printf("[WARN] could not persist channel state to Supabase: %v\n", err)
+                fmt.Println("[WARN] channels are running but state changes will be lost if the container restarts")
+        }
 
-	// Clean up orphaned sidecar files from previous interrupted runs
-	go func() {
-		channel.CleanupOrphanedFiles()
-		m.ScanThumbnails()
-	}()
+        // Clean up orphaned sidecar files from previous interrupted runs
+        go func() {
+                channel.CleanupOrphanedFiles()
+                m.ScanThumbnails()
+        }()
 
         return nil
 }
@@ -224,6 +224,10 @@ func (m *Manager) StopChannel(username string) error {
         }
         thing.(*channel.Channel).Stop()
         m.Channels.Delete(username)
+
+        if err := server.DeleteChannelFromDB(username); err != nil {
+                fmt.Printf("[WARN] failed to delete channel %s from DB: %v\n", username, err)
+        }
 
         if err := m.SaveConfig(); err != nil {
                 return fmt.Errorf("save config: %w", err)

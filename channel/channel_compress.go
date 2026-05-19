@@ -124,6 +124,7 @@ func (ch *Channel) CompressFile(srcPath string) {
 		mkvInfo, err := os.Stat(mkvPath)
 		if err != nil {
 			ch.Error("compress: failed to stat mkv: %s", err.Error())
+				os.Remove(mkvPath) // clean up incomplete output file
 			return
 		}
 		mkvSize := mkvInfo.Size()

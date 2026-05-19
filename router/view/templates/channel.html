@@ -25,7 +25,6 @@
         body { background: var(--bg-body); color: var(--text-primary); min-height: 100dvh; font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; }
         .page-header {
             background: var(--bg-surface-alt);
-            backdrop-filter: blur(24px) saturate(1.2);
             border-bottom: 1px solid var(--border-subtle);
             position: sticky; top: 0; z-index: 50;
         }
@@ -44,20 +43,17 @@
         .card-thumb::after {
             content: '';
             position: absolute; inset: 0;
-            background: linear-gradient(to top, rgba(10,9,8,0.95) 0%, rgba(10,9,8,0.3) 35%, transparent 60%);
+            background: linear-gradient(to top, rgba(10,9,8,0.75) 0%, rgba(10,9,8,0.2) 40%, transparent 65%);
             pointer-events: none;
             z-index: 1;
+            transition: opacity 0.25s ease;
         }
         .video-card:hover .card-thumb::after { opacity: 0; }
         .card-thumb img { width: 100%; height: 100%; object-fit: cover; }
 
-        .sprite-overlay { position: absolute; inset: 0; overflow: hidden; opacity: 0; z-index: 2; }
+        .sprite-overlay { position: absolute; inset: 0; overflow: hidden; opacity: 0; z-index: 2; transition: opacity 0.15s; }
         .video-card:hover .sprite-overlay { opacity: 1; }
-        .sprite-slideshow {
-            width: 100%; height: 100%;
-            background-size: cover;
-            background-position: center;
-        }
+        .sprite-anim { width: 100%; height: 100%; background-repeat: no-repeat; }
 
         .play-btn-wrap {
             position: absolute; inset: 0;
@@ -134,6 +130,24 @@
             color: #52525b; cursor: pointer; transition: all 0.15s;
         }
         .delete-btn:hover { background: rgba(212,160,83,0.1); border-color: rgba(212,160,83,0.2); color: #d4a053; }
+
+        /* ── Performance ── */
+        .video-card { contain: layout style paint; }
+        .sprite-anim { image-rendering: auto; }
+
+        /* ── Light mode ── */
+        html:not(.dark) body { background: #f4f4f5; color: #18181b; }
+        html:not(.dark) .page-header { background: #ffffff !important; border-bottom: 1px solid #e4e4e7; }
+        html:not(.dark) .video-card { background: rgba(255,255,255,0.95) !important; border: 1px solid #e4e4e7 !important; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        html:not(.dark) .video-card:hover { background-color: #f9fafb !important; border-color: rgba(212,160,83,0.3) !important; }
+        html:not(.dark) .card-thumb { background: #f4f4f5; }
+        html:not(.dark) .card-thumb::after { background: linear-gradient(to top, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.12) 40%, transparent 65%); }
+        html:not(.dark) .card-title { color: #18181b; }
+        html:not(.dark) .card-subtitle { color: #71717a; }
+        html:not(.dark) .badge { background: rgba(0,0,0,0.55); color: #fff; }
+        html:not(.dark) .host-badge { background: rgba(16,185,129,0.12); color: #059669; border-color: rgba(16,185,129,0.25); }
+        html:not(.dark) .tag-badge { background: rgba(139,92,246,0.1); color: #7c3aed; border-color: rgba(139,92,246,0.2); }
+        html:not(.dark) .delete-btn { background: rgba(0,0,0,0.04); border-color: #e4e4e7; color: #71717a; }
     </style>
 </head>
 <body>
@@ -141,8 +155,7 @@
 <div class="page-header">
     <div class="max-w-screen-xl mx-auto px-5 py-3.5 flex items-center justify-between">
         <div class="flex items-center gap-3">
-            <a href="/videos" class="w-9 h-9 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all"
-               style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)" title="Back">
+            <a href="/videos" class="nav-btn w-9 h-9" title="Back">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             </a>
             <div class="flex items-center gap-2.5">
@@ -156,8 +169,7 @@
                 </div>
             </div>
         </div>
-        <button onclick="toggleDarkMode()" class="w-9 h-9 flex items-center justify-center rounded-xl text-zinc-500 hover:text-zinc-200 transition-all"
-                style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)">
+        <button onclick="toggleDarkMode()" class="nav-btn w-9 h-9">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
         </button>
     </div>
@@ -179,15 +191,17 @@
 
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {{ range .Videos }}
-        <div class="video-card group {{ if .FullPath }}cursor-pointer{{ end }}"
-             onclick="{{ if .FullPath }}window.location.href='/video?path={{ .FullPath | urlquery }}'{{ end }}">
+        <div class="video-card group cursor-pointer"
+             data-sprite="{{ .SpriteURL }}"
+             data-video-href="{{ if .FullPath }}/video?path={{ .FullPath | urlquery }}{{ else }}/video?path={{ .Filename | urlquery }}{{ end }}"
+             onclick="location.href=this.dataset.videoHref">
             <div class="card-thumb">
                 {{ if .ThumbnailURL }}
                 <img src="{{ .ThumbnailURL }}" alt="" loading="lazy" />
                 {{ end }}
                 {{ if .SpriteURL }}
                 <div class="sprite-overlay">
-                    <div class="sprite-slideshow" style="background-image:url('{{ .SpriteURL }}');"></div>
+                    <div class="sprite-anim"></div>
                 </div>
                 {{ end }}
                 {{ if not .ThumbnailURL }}
@@ -261,6 +275,43 @@ function toggleDarkMode() {
     var isDark = document.documentElement.classList.toggle('dark');
     localStorage.setItem('darkMode', isDark ? 'true' : 'false');
 }
+
+// ── Sprite filmstrip animation ──────────────────────────────────────────────
+(function() {
+    var COLS = 4, ROWS = 4, FRAMES = 16, MS = 380;
+    function initCard(card) {
+        var url = card.dataset.sprite;
+        if (!url) return;
+        var el = card.querySelector('.sprite-anim');
+        if (!el) return;
+        var frame = 0, timer = null, loaded = false;
+        function show(f) {
+            var c = f % COLS, r = Math.floor(f / COLS);
+            var x = (COLS > 1) ? (c / (COLS - 1)) * 100 : 0;
+            var y = (ROWS > 1) ? (r / (ROWS - 1)) * 100 : 0;
+            el.style.backgroundPosition = x + '% ' + y + '%';
+        }
+        function load() {
+            if (loaded) return;
+            loaded = true;
+            el.style.backgroundImage = "url('" + url + "')";
+            el.style.backgroundSize  = (COLS * 100) + '% ' + (ROWS * 100) + '%';
+        }
+        card.addEventListener('mouseenter', function() {
+            load(); frame = 0; show(frame);
+            timer = setInterval(function() { frame = (frame + 1) % FRAMES; show(frame); }, MS);
+        });
+        card.addEventListener('mouseleave', function() { clearInterval(timer); timer = null; });
+    }
+    if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function(entries) {
+            entries.forEach(function(e) { if (e.isIntersecting) { initCard(e.target); io.unobserve(e.target); } });
+        }, { rootMargin: '200px' });
+        document.querySelectorAll('.video-card').forEach(function(c) { io.observe(c); });
+    } else {
+        document.querySelectorAll('.video-card').forEach(initCard);
+    }
+})();
 </script>
 </body>
 </html>

@@ -68,19 +68,37 @@ type VideoGroup struct {
 }
 
 type VideosData struct {
-        Config *entity.Config
-        Videos []*VideoEntry
-        Groups []VideoGroup
+        Config      *entity.Config
+        Videos      []*VideoEntry
+        Groups      []VideoGroup
+        Recommended []*VideoEntry
 }
 
 func Videos(c *gin.Context) {
         videos := scanVideos()
         groups := groupVideos(videos)
 
+        // Show most recently added videos in the "Recommended" slot on the library page.
+        // Using a fixed reference video (videos[0]) was arbitrary and misleading.
+        var recommended []*VideoEntry
+        if len(videos) > 0 {
+                sorted := make([]*VideoEntry, len(videos))
+                copy(sorted, videos)
+                sort.Slice(sorted, func(i, j int) bool {
+                        return sorted[i].ModTimeSort > sorted[j].ModTimeSort
+                })
+                limit := 8
+                if len(sorted) < limit {
+                        limit = len(sorted)
+                }
+                recommended = sorted[:limit]
+        }
+
         c.HTML(200, "videos.html", &VideosData{
-                Config: server.Config,
-                Videos: videos,
-                Groups: groups,
+                Config:      server.Config,
+                Videos:      videos,
+                Groups:      groups,
+                Recommended: recommended,
         })
 }
 
@@ -165,6 +183,19 @@ func scanVideos() []*VideoEntry {
                         if rec.Filesize > 0 {
                                 fs = internal.FormatFilesize(int(rec.Filesize))
                         }
+                        // For uploaded-only entries, supplement thumbnail/sprite from
+                        // the preview_images table (previewLinks) if the recordings
+                        // table has empty URLs (they are stored separately).
+                        thumbURL := rec.ThumbnailURL
+                        spriteURL := rec.SpriteURL
+                        if links, ok := previewLinks[filename]; ok {
+                                if thumbURL == "" && links[0] != "" {
+                                        thumbURL = links[0]
+                                }
+                                if spriteURL == "" && links[1] != "" {
+                                        spriteURL = links[1]
+                                }
+                        }
                         entries = append(entries, &VideoEntry{
                                 Username:     username,
                                 Filename:     filename,
@@ -180,8 +211,8 @@ func scanVideos() []*VideoEntry {
                                 Gender:       chanData.Gender,
                                 Resolution:   rec.Resolution,
                                 Framerate:    rec.Framerate,
-                                ThumbnailURL: rec.ThumbnailURL,
-                                SpriteURL:    rec.SpriteURL,
+                                ThumbnailURL: thumbURL,
+                                SpriteURL:    spriteURL,
                         })
                 }
         }
@@ -193,84 +224,84 @@ func scanVideos() []*VideoEntry {
 }
 
 func loadRecordings() *RecordingsDB {
-	empty := &RecordingsDB{Version: 2, Channels: map[string]*ChannelRecordings{}}
+        empty := &RecordingsDB{Version: 2, Channels: map[string]*ChannelRecordings{}}
 
-	dbData := server.LoadRecordingsFromDB()
-	if dbData == nil {
-		return empty
-	}
+        dbData := server.LoadRecordingsFromDB()
+        if dbData == nil {
+                return empty
+        }
 
-	var db RecordingsDB
-	if err := json.Unmarshal(dbData, &db); err != nil {
-		return empty
-	}
-	return &db
+        var db RecordingsDB
+        if err := json.Unmarshal(dbData, &db); err != nil {
+                return empty
+        }
+        return &db
 }
 
 func walkDir(dir string, previewLinks map[string][2]string) []*VideoEntry {
-	var entries []*VideoEntry
+        var entries []*VideoEntry
 
-	d, err := os.Open(dir)
-	if err != nil {
-		return entries
-	}
-	defer d.Close()
+        d, err := os.Open(dir)
+        if err != nil {
+                return entries
+        }
+        defer d.Close()
 
-	items, err := d.Readdir(-1)
-	if err != nil {
-		return entries
-	}
+        items, err := d.Readdir(-1)
+        if err != nil {
+                return entries
+        }
 
-	for _, item := range items {
-		full := filepath.Join(dir, item.Name())
-		if item.IsDir() {
-			entries = append(entries, walkDir(full, previewLinks)...)
-			continue
-		}
+        for _, item := range items {
+                full := filepath.Join(dir, item.Name())
+                if item.IsDir() {
+                        entries = append(entries, walkDir(full, previewLinks)...)
+                        continue
+                }
 
-		ext := strings.ToLower(filepath.Ext(item.Name()))
-		if !videoExts[ext] {
-			continue
-		}
-		if strings.Contains(item.Name(), ".video.") || strings.Contains(item.Name(), ".audio.") {
-			continue
-		}
+                ext := strings.ToLower(filepath.Ext(item.Name()))
+                if !videoExts[ext] {
+                        continue
+                }
+                if strings.Contains(item.Name(), ".video.") || strings.Contains(item.Name(), ".audio.") {
+                        continue
+                }
 
-		username := extractUsername(item.Name())
-		sizeStr := internal.FormatFilesize(int(item.Size()))
-		if sizeStr == "" {
-			sizeStr = "0 B"
-		}
-		modTime := item.ModTime().Format("2006-01-02 15:04")
+                username := extractUsername(item.Name())
+                sizeStr := internal.FormatFilesize(int(item.Size()))
+                if sizeStr == "" {
+                        sizeStr = "0 B"
+                }
+                modTime := item.ModTime().Format("2006-01-02 15:04")
 
-		isOutput := false
-		if server.Config != nil && server.Config.OutputDir != "" {
-			absPath, _ := filepath.Abs(full)
-			absOut, _ := filepath.Abs(server.Config.OutputDir)
-			isOutput = strings.HasPrefix(absPath, absOut)
-		}
+                isOutput := false
+                if server.Config != nil && server.Config.OutputDir != "" {
+                        absPath, _ := filepath.Abs(full)
+                        absOut, _ := filepath.Abs(server.Config.OutputDir)
+                        isOutput = strings.HasPrefix(absPath, absOut)
+                }
 
-		// Look up preview URLs from preloaded map
-		var thumbURL, spriteURL string
-		if links, ok := previewLinks[item.Name()]; ok {
-			thumbURL = links[0]
-			spriteURL = links[1]
-		}
+                // Look up preview URLs from preloaded map
+                var thumbURL, spriteURL string
+                if links, ok := previewLinks[item.Name()]; ok {
+                        thumbURL = links[0]
+                        spriteURL = links[1]
+                }
 
-		entries = append(entries, &VideoEntry{
-			Username:     username,
-			Filename:     item.Name(),
-			FullPath:     full,
-			Size:         sizeStr,
-			ModTime:      modTime,
-			ModTimeSort:  item.ModTime().Format(time.RFC3339),
-			ThumbnailURL: thumbURL,
-			SpriteURL:    spriteURL,
-			IsOutputDir:  isOutput,
-		})
-	}
+                entries = append(entries, &VideoEntry{
+                        Username:     username,
+                        Filename:     item.Name(),
+                        FullPath:     full,
+                        Size:         sizeStr,
+                        ModTime:      modTime,
+                        ModTimeSort:  item.ModTime().Format(time.RFC3339),
+                        ThumbnailURL: thumbURL,
+                        SpriteURL:    spriteURL,
+                        IsOutputDir:  isOutput,
+                })
+        }
 
-	return entries
+        return entries
 }
 
 func extractUsername(filename string) string {

@@ -3,6 +3,7 @@ package router
 import (
         "encoding/json"
         "fmt"
+        "html/template"
         "io"
         "mime"
         "net/http"
@@ -63,60 +64,65 @@ type CreateChannelRequest struct {
 
 // CreateChannel creates a new channel.
 func CreateChannel(c *gin.Context) {
-	var req *CreateChannelRequest
-	if err := c.Bind(&req); err != nil {
-		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("bind: %w", err))
-		return
-	}
+        var req *CreateChannelRequest
+        if err := c.Bind(&req); err != nil {
+                c.AbortWithError(http.StatusBadRequest, fmt.Errorf("bind: %w", err))
+                return
+        }
 
-	var lastErr error
-	for _, username := range strings.Split(req.Username, ",") {
-		if err := server.Manager.CreateChannel(&entity.ChannelConfig{
-			Username:    username,
-			Framerate:   req.Framerate,
-			Resolution:  req.Resolution,
-			Pattern:     req.Pattern,
-			MaxDuration: req.MaxDuration,
-			MaxFilesize: req.MaxFilesize,
-			Compress:    req.Compress,
-			CreatedAt:   time.Now().Unix(),
-		}, true); err != nil {
-			lastErr = err
-			fmt.Printf("[ERROR] create channel %s: %v\n", username, err)
-		}
-	}
-	if lastErr != nil {
-		c.String(http.StatusInternalServerError, "Failed to save channel config: %v", lastErr)
-		return
-	}
-	c.Redirect(http.StatusFound, "/")
+        var lastErr error
+        for _, username := range strings.Split(req.Username, ",") {
+                if err := server.Manager.CreateChannel(&entity.ChannelConfig{
+                        Username:    username,
+                        Framerate:   req.Framerate,
+                        Resolution:  req.Resolution,
+                        Pattern:     req.Pattern,
+                        MaxDuration: req.MaxDuration,
+                        MaxFilesize: req.MaxFilesize,
+                        Compress:    req.Compress,
+                        CreatedAt:   time.Now().Unix(),
+                }, true); err != nil {
+                        lastErr = err
+                        fmt.Printf("[ERROR] create channel %s: %v\n", username, err)
+                }
+        }
+        if lastErr != nil {
+                c.String(http.StatusInternalServerError, "Failed to save channel config: %v", lastErr)
+                return
+        }
+        c.Redirect(http.StatusFound, "/")
 }
 
 // StopChannel stops a channel.
 func StopChannel(c *gin.Context) {
-	if err := server.Manager.StopChannel(c.Param("username")); err != nil {
-		fmt.Printf("[ERROR] stop channel %s: %v\n", c.Param("username"), err)
-	}
+        if err := server.Manager.StopChannel(c.Param("username")); err != nil {
+                fmt.Printf("[ERROR] stop channel %s: %v\n", c.Param("username"), err)
+        }
 
-	c.Redirect(http.StatusFound, "/")
+        if c.GetHeader("HX-Request") == "true" {
+                c.Header("HX-Redirect", "/")
+                c.Status(http.StatusNoContent)
+                return
+        }
+        c.Redirect(http.StatusFound, "/")
 }
 
 // PauseChannel pauses a channel.
 func PauseChannel(c *gin.Context) {
-	if err := server.Manager.PauseChannel(c.Param("username")); err != nil {
-		fmt.Printf("[ERROR] pause channel %s: %v\n", c.Param("username"), err)
-	}
+        if err := server.Manager.PauseChannel(c.Param("username")); err != nil {
+                fmt.Printf("[ERROR] pause channel %s: %v\n", c.Param("username"), err)
+        }
 
-	c.Redirect(http.StatusFound, "/")
+        c.Redirect(http.StatusFound, "/")
 }
 
 // ResumeChannel resumes a paused channel.
 func ResumeChannel(c *gin.Context) {
-	if err := server.Manager.ResumeChannel(c.Param("username")); err != nil {
-		fmt.Printf("[ERROR] resume channel %s: %v\n", c.Param("username"), err)
-	}
+        if err := server.Manager.ResumeChannel(c.Param("username")); err != nil {
+                fmt.Printf("[ERROR] resume channel %s: %v\n", c.Param("username"), err)
+        }
 
-	c.Redirect(http.StatusFound, "/")
+        c.Redirect(http.StatusFound, "/")
 }
 
 // Updates handles the SSE connection for updates.
@@ -133,28 +139,28 @@ type UpdateConfigRequest struct {
 
 // UpdateConfig updates the server configuration from the Web UI form or API POST.
 func UpdateConfig(c *gin.Context) {
-	var req UpdateConfigRequest
-	if err := c.ShouldBind(&req); err != nil {
-		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("bind: %w", err))
-		return
-	}
+        var req UpdateConfigRequest
+        if err := c.ShouldBind(&req); err != nil {
+                c.AbortWithError(http.StatusBadRequest, fmt.Errorf("bind: %w", err))
+                return
+        }
 
-	if req.Cookies != "" || req.UserAgent != "" {
-		server.UpdateByparrCredentials(req.Cookies, req.UserAgent)
-	}
-	if req.ByparrURL != "" {
-		server.Config.ByparrURL = req.ByparrURL
-	}
+        if req.Cookies != "" || req.UserAgent != "" {
+                server.UpdateByparrCredentials(req.Cookies, req.UserAgent)
+        }
+        if req.ByparrURL != "" {
+                server.Config.ByparrURL = req.ByparrURL
+        }
 
-	if err := server.SaveSettings(); err != nil {
-		fmt.Printf("[WARN] could not save settings: %v\n", err)
-	}
+        if err := server.SaveSettings(); err != nil {
+                fmt.Printf("[WARN] could not save settings: %v\n", err)
+        }
 
-	if c.ContentType() == "application/json" {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-		return
-	}
-	c.Redirect(http.StatusFound, "/")
+        if c.ContentType() == "application/json" {
+                c.JSON(http.StatusOK, gin.H{"ok": true})
+                return
+        }
+        c.Redirect(http.StatusFound, "/")
 }
 
 // isPathAllowed checks whether abs is inside the videos/ directory or the
@@ -348,8 +354,8 @@ func VideoDetail(c *gin.Context) {
         stat, statErr := os.Stat(abs)
         fileOnDisk := statErr == nil
 
-	// Load preview URLs from Supabase
-	thumbURL, spriteURL := server.LoadPreviewLinks(filename)
+        // Load preview URLs from Supabase
+        thumbURL, spriteURL := server.LoadPreviewLinks(filename)
 
         // Look up recording metadata from recordings DB
         db := loadRecordings()
@@ -452,7 +458,8 @@ func VideoDetail(c *gin.Context) {
                 }
         }
 
-        hostPlayersJSON, _ := json.Marshal(hostPlayers)
+        hostPlayersJSONBytes, _ := json.Marshal(hostPlayers)
+        hostPlayersJSON := template.JS(hostPlayersJSONBytes)
 
         // Find a direct video URL from upload links (for native player fallback).
         videoURL := ""
@@ -560,8 +567,8 @@ func embedURLForHostLink(host, link, byseAPIKey string) string {
                         return byseEmbedURL(code, byseAPIKey)
                 }
         }
-        if strings.Contains(normalizedHost, "sendcm") || strings.Contains(normalizedLink, "send.now/") {
-                return link
+        if strings.Contains(normalizedHost, "sendcm") || strings.Contains(normalizedLink, "send.cm/") || strings.Contains(normalizedLink, "send.now/") {
+                return ""
         }
         if strings.Contains(normalizedHost, "voe") || strings.Contains(normalizedLink, "voe.sx/") {
                 if code := extractFileCode(link); code != "" {
@@ -662,7 +669,7 @@ func videoURLForHostLink(host, link string) string {
                 return link
         case strings.Contains(normalizedHost, "sendcm") || strings.Contains(normalizedLink, "send.now/"):
                 return link
-		case strings.Contains(normalizedHost, "turboviplay") || strings.Contains(normalizedLink, "emturbovid.com/") || strings.Contains(normalizedLink, "turboviplay.com/"):
+                case strings.Contains(normalizedHost, "turboviplay") || strings.Contains(normalizedLink, "emturbovid.com/") || strings.Contains(normalizedLink, "turboviplay.com/"):
                 return link
         default:
                 return ""
@@ -672,36 +679,36 @@ func videoURLForHostLink(host, link string) string {
 // ─── Tunnel API ──────────────────────────────────────────────────────────────
 
 type tunnelRequest struct {
-	URL   string `json:"url" form:"url"`
-	RunID int    `json:"run_id" form:"run_id"`
+        URL   string `json:"url" form:"url"`
+        RunID int    `json:"run_id" form:"run_id"`
 }
 
 // UpdateTunnel saves a tunnel URL to Supabase.
 func UpdateTunnel(c *gin.Context) {
-	var req tunnelRequest
-	if err := c.ShouldBind(&req); err != nil {
-		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("bind: %w", err))
-		return
-	}
-	if req.URL == "" {
-		c.AbortWithStatus(http.StatusBadRequest)
-		return
-	}
-	if err := server.SaveTunnelToDB(req.URL, req.RunID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+        var req tunnelRequest
+        if err := c.ShouldBind(&req); err != nil {
+                c.AbortWithError(http.StatusBadRequest, fmt.Errorf("bind: %w", err))
+                return
+        }
+        if req.URL == "" {
+                c.AbortWithStatus(http.StatusBadRequest)
+                return
+        }
+        if err := server.SaveTunnelToDB(req.URL, req.RunID); err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+                return
+        }
+        c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // GetTunnel returns the current active tunnel URL.
 func GetTunnel(c *gin.Context) {
-	url, err := server.LoadCurrentTunnel()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"url": url})
+        url, err := server.LoadCurrentTunnel()
+        if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+                return
+        }
+        c.JSON(http.StatusOK, gin.H{"url": url})
 }
 
 func extractFileCode(link string) string {

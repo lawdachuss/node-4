@@ -280,7 +280,6 @@ select {
 /* ── Video card ── */
 .video-card {
   transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), box-shadow 0.3s ease, border-color 0.2s ease, background-color 0.2s ease;
-  will-change: transform;
 }
 .video-card:hover {
   transform: translateY(-6px) scale(1.008);
