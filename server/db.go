@@ -130,13 +130,11 @@ func loadJSONSetting(key string) []byte {
 
 // ─── Channels ─────────────────────────────────────────────────────────────────
 
-// SaveChannelsToDB saves channels to Supabase using the new table structure
+// SaveChannelsToDB saves channels to Supabase
 func SaveChannelsToDB(data []byte) error {
 	client := GetDBClient()
 	if client == nil {
-		// Fallback to old JSON method
-		fmt.Println("[INFO] Supabase not configured, using JSON storage")
-		return saveJSONSetting("dvr_channels", data)
+		return fmt.Errorf("Supabase not configured")
 	}
 
 	var configs []*entity.ChannelConfig
@@ -144,8 +142,6 @@ func SaveChannelsToDB(data []byte) error {
 		return fmt.Errorf("unmarshal channels: %w", err)
 	}
 
-	// Try to save to Supabase tables
-	hasError := false
 	for _, conf := range configs {
 		ch := &database.Channel{
 			Username:    conf.Username,
@@ -159,21 +155,8 @@ func SaveChannelsToDB(data []byte) error {
 			CreatedAt:   conf.CreatedAt,
 		}
 		if err := client.SaveChannel(ch); err != nil {
-			fmt.Printf("[WARN] Failed to save channel %s to Supabase: %v\n", conf.Username, err)
-			hasError = true
-			break
+			return fmt.Errorf("save channel %s: %w", conf.Username, err)
 		}
-	}
-
-	// If Supabase save failed, fall back to JSON method
-	if hasError {
-		fmt.Println("[INFO] Falling back to JSON storage due to Supabase errors")
-		return saveJSONSetting("dvr_channels", data)
-	}
-
-	// Also save to JSON for backward compatibility
-	if err := saveJSONSetting("dvr_channels", data); err != nil {
-		fmt.Printf("[WARN] Failed to save channels to JSON backup: %v\n", err)
 	}
 
 	return nil
@@ -183,15 +166,13 @@ func SaveChannelsToDB(data []byte) error {
 func LoadChannelsFromDB() []byte {
 	client := GetDBClient()
 	if client == nil {
-		// Fallback to old JSON method
-		return loadJSONSetting("dvr_channels")
+		return nil
 	}
 
 	channels, err := client.GetAllChannels()
 	if err != nil {
 		fmt.Printf("[WARN] failed to load channels from Supabase: %v\n", err)
-		// Fallback to old JSON method
-		return loadJSONSetting("dvr_channels")
+		return nil
 	}
 
 	// Convert to entity.ChannelConfig format
@@ -232,13 +213,11 @@ func LoadSettingsFromDB() []byte {
 
 // ─── Recordings ───────────────────────────────────────────────────────────────
 
-// SaveRecordingsToDB saves recordings to Supabase using the new table structure
+// SaveRecordingsToDB saves recordings to Supabase
 func SaveRecordingsToDB(data []byte) error {
 	client := GetDBClient()
 	if client == nil {
-		// Fallback to old JSON method
-		fmt.Println("[INFO] Supabase not configured, using JSON storage for recordings")
-		return saveJSONSetting("recordings_db", data)
+		return fmt.Errorf("Supabase not configured")
 	}
 
 	// Parse the JSON data
@@ -269,15 +248,11 @@ func SaveRecordingsToDB(data []byte) error {
 
 	var db RecordingsDB
 	if err := json.Unmarshal(data, &db); err != nil {
-		fmt.Printf("[WARN] Failed to parse recordings JSON: %v\n", err)
-		return saveJSONSetting("recordings_db", data)
+		return fmt.Errorf("parse recordings: %w", err)
 	}
 
-	// Save each recording to Supabase
-	hasError := false
 	for username, chanData := range db.Channels {
 		for _, rec := range chanData.Recordings {
-			// Save recording
 			recording := &database.Recording{
 				Username:     username,
 				Filename:     rec.Filename,
@@ -295,19 +270,14 @@ func SaveRecordingsToDB(data []byte) error {
 			}
 
 			if err := client.SaveRecording(recording); err != nil {
-				fmt.Printf("[WARN] Failed to save recording %s to Supabase: %v\n", rec.Filename, err)
-				hasError = true
-				break
+				return fmt.Errorf("save recording %s: %w", rec.Filename, err)
 			}
 
-			// Get the recording ID to save upload links
 			savedRec, err := client.GetRecording(rec.Filename)
 			if err != nil {
-				fmt.Printf("[WARN] Failed to get recording %s: %v\n", rec.Filename, err)
-				continue
+				return fmt.Errorf("get recording %s after save: %w", rec.Filename, err)
 			}
 
-			// Save upload links
 			for host, url := range rec.Links {
 				link := &database.UploadLink{
 					RecordingID: savedRec.ID,
@@ -315,11 +285,10 @@ func SaveRecordingsToDB(data []byte) error {
 					URL:         url,
 				}
 				if err := client.SaveUploadLink(link); err != nil {
-					fmt.Printf("[WARN] Failed to save upload link for %s (%s): %v\n", rec.Filename, host, err)
+					return fmt.Errorf("save upload link %s/%s: %w", rec.Filename, host, err)
 				}
 			}
 
-			// Save preview images
 			if rec.ThumbnailURL != "" || rec.SpriteURL != "" {
 				img := &database.PreviewImage{
 					RecordingID:  savedRec.ID,
@@ -328,21 +297,10 @@ func SaveRecordingsToDB(data []byte) error {
 					SpriteURL:    rec.SpriteURL,
 				}
 				if err := client.SavePreviewImage(img); err != nil {
-					fmt.Printf("[WARN] Failed to save preview image for %s: %v\n", rec.Filename, err)
+					return fmt.Errorf("save preview image %s: %w", rec.Filename, err)
 				}
 			}
 		}
-	}
-
-	// If Supabase save failed, fall back to JSON method
-	if hasError {
-		fmt.Println("[INFO] Falling back to JSON storage for recordings due to Supabase errors")
-		return saveJSONSetting("recordings_db", data)
-	}
-
-	// Also save to JSON for backward compatibility
-	if err := saveJSONSetting("recordings_db", data); err != nil {
-		fmt.Printf("[WARN] Failed to save recordings to JSON backup: %v\n", err)
 	}
 
 	return nil
@@ -352,16 +310,13 @@ func SaveRecordingsToDB(data []byte) error {
 func LoadRecordingsFromDB() []byte {
 	client := GetDBClient()
 	if client == nil {
-		// Fallback to old JSON method
-		return loadJSONSetting("recordings_db")
+		return nil
 	}
 
-	// Try to load from Supabase
 	recordings, err := client.GetAllRecordings()
 	if err != nil {
 		fmt.Printf("[WARN] Failed to load recordings from Supabase: %v\n", err)
-		// Fallback to old JSON method
-		return loadJSONSetting("recordings_db")
+		return nil
 	}
 
 	// Convert to the old JSON format for compatibility
@@ -435,11 +390,10 @@ func LoadRecordingsFromDB() []byte {
 		chanData.Recordings = append(chanData.Recordings, entry)
 	}
 
-	// Convert to JSON
 	data, err := json.Marshal(db)
 	if err != nil {
 		fmt.Printf("[WARN] Failed to marshal recordings: %v\n", err)
-		return loadJSONSetting("recordings_db")
+		return nil
 	}
 
 	return data
@@ -449,8 +403,7 @@ func LoadRecordingsFromDB() []byte {
 func SaveRecordingWithLinks(username, filename, timestamp, roomTitle string, tags []string, viewers int, resolution string, framerate int, filesize int64, gender, thumbnailURL, spriteURL, embedURL string, links map[string]string) error {
 	client := GetDBClient()
 	if client == nil {
-		fmt.Println("[WARN] Supabase client not available, cannot save recording")
-		return nil // Don't error out, just skip
+		return fmt.Errorf("Supabase not configured")
 	}
 
 	// Save recording
@@ -516,15 +469,9 @@ func SaveRecordingWithLinks(username, filename, timestamp, roomTitle string, tag
 func SaveTunnelToDB(tunnelURL string, runID int) error {
 	client := GetDBClient()
 	if client == nil {
-		// Fallback to old JSON method
-		tunnelJSON := fmt.Sprintf(`"%s"`, tunnelURL)
-		if err := saveJSONSetting("tunnel_url", []byte(tunnelJSON)); err != nil {
-			return fmt.Errorf("save tunnel to Supabase: %w", err)
-		}
-		return nil
+		return fmt.Errorf("Supabase not configured")
 	}
 
-	// Deactivate old tunnels first
 	if err := client.DeactivateOldTunnels(); err != nil {
 		fmt.Printf("[WARN] failed to deactivate old tunnels: %v\n", err)
 	}
@@ -535,45 +482,19 @@ func SaveTunnelToDB(tunnelURL string, runID int) error {
 		IsActive: true,
 	}
 
-	if err := client.SaveTunnel(tunnel); err != nil {
-		// Fallback to old JSON method
-		tunnelJSON := fmt.Sprintf(`"%s"`, tunnelURL)
-		if err := saveJSONSetting("tunnel_url", []byte(tunnelJSON)); err != nil {
-			return fmt.Errorf("save tunnel to Supabase: %w", err)
-		}
-	}
-
-	return nil
+	return client.SaveTunnel(tunnel)
 }
 
 // LoadCurrentTunnel loads the active tunnel URL from Supabase
 func LoadCurrentTunnel() (string, error) {
 	client := GetDBClient()
 	if client == nil {
-		// Fallback to old JSON method
-		raw := loadJSONSetting("tunnel_url")
-		if raw == nil {
-			return "", nil
-		}
-		var tunnelURL string
-		if err := json.Unmarshal(raw, &tunnelURL); err != nil {
-			return "", fmt.Errorf("parse tunnel URL: %w", err)
-		}
-		return tunnelURL, nil
+		return "", nil
 	}
 
 	tunnel, err := client.GetActiveTunnel()
 	if err != nil {
-		// Fallback to old JSON method
-		raw := loadJSONSetting("tunnel_url")
-		if raw == nil {
-			return "", nil
-		}
-		var tunnelURL string
-		if err := json.Unmarshal(raw, &tunnelURL); err != nil {
-			return "", fmt.Errorf("parse tunnel URL: %w", err)
-		}
-		return tunnelURL, nil
+		return "", err
 	}
 
 	return tunnel.URL, nil
@@ -585,15 +506,7 @@ func LoadCurrentTunnel() (string, error) {
 func SavePreviewLinks(filename, thumbnailURL, spriteURL string) error {
 	client := GetDBClient()
 	if client == nil {
-		// Fallback to old JSON method
-		data, err := json.Marshal(map[string]string{
-			"thumbnail_url": thumbnailURL,
-			"sprite_url":    spriteURL,
-		})
-		if err != nil {
-			return fmt.Errorf("marshal preview links: %w", err)
-		}
-		return saveJSONSetting("preview_link:"+filename, data)
+		return fmt.Errorf("Supabase not configured")
 	}
 
 	img := &database.PreviewImage{
@@ -602,55 +515,19 @@ func SavePreviewLinks(filename, thumbnailURL, spriteURL string) error {
 		SpriteURL:    spriteURL,
 	}
 
-	if err := client.SavePreviewImage(img); err != nil {
-		// Fallback to old JSON method
-		data, err := json.Marshal(map[string]string{
-			"thumbnail_url": thumbnailURL,
-			"sprite_url":    spriteURL,
-		})
-		if err != nil {
-			return fmt.Errorf("marshal preview links: %w", err)
-		}
-		return saveJSONSetting("preview_link:"+filename, data)
-	}
-
-	return nil
+	return client.SavePreviewImage(img)
 }
 
 // LoadPreviewLinks loads preview image URLs from Supabase
 func LoadPreviewLinks(filename string) (thumbnailURL, spriteURL string) {
 	client := GetDBClient()
 	if client == nil {
-		// Fallback to old JSON method
-		raw := loadJSONSetting("preview_link:" + filename)
-		if raw == nil {
-			return "", ""
-		}
-		var entry struct {
-			ThumbnailURL string `json:"thumbnail_url"`
-			SpriteURL    string `json:"sprite_url"`
-		}
-		if err := json.Unmarshal(raw, &entry); err != nil {
-			return "", ""
-		}
-		return entry.ThumbnailURL, entry.SpriteURL
+		return "", ""
 	}
 
 	img, err := client.GetPreviewImage(filename)
 	if err != nil {
-		// Fallback to old JSON method
-		raw := loadJSONSetting("preview_link:" + filename)
-		if raw == nil {
-			return "", ""
-		}
-		var entry struct {
-			ThumbnailURL string `json:"thumbnail_url"`
-			SpriteURL    string `json:"sprite_url"`
-		}
-		if err := json.Unmarshal(raw, &entry); err != nil {
-			return "", ""
-		}
-		return entry.ThumbnailURL, entry.SpriteURL
+		return "", ""
 	}
 
 	return img.ThumbnailURL, img.SpriteURL

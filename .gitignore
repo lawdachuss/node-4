@@ -27,6 +27,7 @@ database/*
 !database/recordings.json
 !database/settings.json
 !database/tunnel.json
+!database/supabase.go
 
 # AWS secrets and keys
 aws-secrets/

@@ -159,6 +159,22 @@ func UpdateConfig(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/")
 }
 
+// isPathAllowed checks whether abs is inside the videos/ directory or the
+// configured OutputDir.  Returns false for any path outside those roots.
+func isPathAllowed(abs string) bool {
+        videosAbs, _ := filepath.Abs("videos")
+        if videosAbs != "" && strings.HasPrefix(abs, videosAbs+string(filepath.Separator)) || abs == videosAbs {
+                return true
+        }
+        if server.Config != nil && server.Config.OutputDir != "" {
+                outAbs, _ := filepath.Abs(server.Config.OutputDir)
+                if outAbs != "" && (strings.HasPrefix(abs, outAbs+string(filepath.Separator)) || abs == outAbs) {
+                        return true
+                }
+        }
+        return false
+}
+
 // Download serves a video file for download.
 func Download(c *gin.Context) {
         path := c.Query("path")
@@ -166,10 +182,13 @@ func Download(c *gin.Context) {
                 c.AbortWithStatus(http.StatusBadRequest)
                 return
         }
-        // Basic path traversal prevention
         abs, err := filepath.Abs(path)
         if err != nil {
                 c.AbortWithStatus(http.StatusBadRequest)
+                return
+        }
+        if !isPathAllowed(abs) {
+                c.AbortWithStatus(http.StatusForbidden)
                 return
         }
         c.FileAttachment(abs, filepath.Base(abs))
@@ -187,27 +206,13 @@ func DeleteVideo(c *gin.Context) {
                 c.Redirect(http.StatusFound, "/videos")
                 return
         }
-        // Prevent deleting files outside allowed directories
-        if server.Config != nil {
-                allowed := false
-                // Check videos/ directory
-                videosAbs, _ := filepath.Abs("videos")
-                if videosAbs != "" && strings.HasPrefix(abs, videosAbs) {
-                        allowed = true
-                }
-                // Check OutputDir
-                if !allowed && server.Config.OutputDir != "" {
-                        outAbs, _ := filepath.Abs(server.Config.OutputDir)
-                        if outAbs != "" && strings.HasPrefix(abs, outAbs) {
-                                allowed = true
-                        }
-                }
-                if !allowed {
-                        c.Redirect(http.StatusFound, "/videos")
-                        return
-                }
+        if !isPathAllowed(abs) {
+                c.Redirect(http.StatusFound, "/videos")
+                return
         }
-        os.Remove(abs)
+        if err := os.Remove(abs); err != nil {
+                fmt.Printf("[ERROR] delete video %s: %v\n", abs, err)
+        }
         c.Redirect(http.StatusFound, "/videos")
 }
 
