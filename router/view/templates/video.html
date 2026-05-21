@@ -899,6 +899,14 @@
                     Delete
                 </button>
             </form>
+            {{ else }}
+            <form action="/delete_video_db" method="POST" onsubmit="return confirm('Remove record for {{ .Filename | js }}?')">
+                <input type="hidden" name="filename" value="{{ .Filename }}" />
+                <button type="submit" class="action-btn action-btn-danger">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                    Remove Record
+                </button>
+            </form>
             {{ end }}
         </div>
     </div>
@@ -945,7 +953,7 @@
         {{ if .Tags }}
         <div class="{{ if .RoomTitle }}mt-2{{ end }}">
             <div class="meta-label mb-2">Tags</div>
-            <div class="flex flex-wrap gap-1.5">{{ range .Tags }}<span class="tag-badge">{{ . }}</span>{{ end }}</div>
+            <div class="flex flex-wrap gap-1.5">{{ range .Tags }}<a href="/videos?tag={{ . | urlquery }}" class="tag-badge">{{ . }}</a>{{ end }}</div>
         </div>
         {{ end }}
     </div>
