@@ -584,7 +584,6 @@ func SavePreviewLinks(filename, thumbnailURL, spriteURL string) error {
 		Filename:     filename,
 		ThumbnailURL: thumbnailURL,
 		SpriteURL:    spriteURL,
-		InstanceID:   instanceID,
 		UploadedAt:   time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 	}
 
