@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -478,25 +479,27 @@ func LoadRecordingsFromDB() []byte {
 // SaveRecordingWithLinks saves a recording and its upload links directly to Supabase.
 // Preview URLs should be saved separately via SavePreviewLinks before calling this.
 // This function only saves the recording metadata and upload links.
-func SaveRecordingWithLinks(username, filename, timestamp, roomTitle string, tags []string, viewers int, resolution string, framerate int, filesize int64, gender, embedURL string, links map[string]string) error {
-        client := GetDBClient()
-        if client == nil {
-                return fmt.Errorf("Supabase not configured")
-        }
+func SaveRecordingWithLinks(username, filename, timestamp, roomTitle string, tags []string, viewers int, resolution string, framerate int, filesize int64, gender, embedURL, thumbnailURL, spriteURL string, links map[string]string) error {
+	client := GetDBClient()
+	if client == nil {
+		return fmt.Errorf("Supabase not configured")
+	}
 
-        // Look up channel ID for foreign key
-        rec := &database.Recording{
-                Username:  username,
-                Filename:  filename,
-                Timestamp: timestamp,
-                RoomTitle: roomTitle,
-                Tags:      tags,
-                Viewers:   viewers,
-                Resolution: resolution,
-                Framerate: framerate,
-                Filesize:  filesize,
-                Gender:    gender,
-                EmbedURL:  embedURL,
+	// Look up channel ID for foreign key
+	rec := &database.Recording{
+		Username:     username,
+		Filename:     filename,
+		Timestamp:    timestamp,
+		RoomTitle:    roomTitle,
+		Tags:         tags,
+		Viewers:      viewers,
+		Resolution:   resolution,
+		Framerate:    framerate,
+		Filesize:     filesize,
+		Gender:       gender,
+		EmbedURL:     embedURL,
+		ThumbnailURL: thumbnailURL,
+		SpriteURL:    spriteURL,
 	}
 	// Skip channel_id lookup — the channels table is shared across instances
 	// and the FK would point to the wrong instance's row.
@@ -645,6 +648,34 @@ func DeleteChannelsNotInDB(usernames []string) error {
                 return nil
         }
         return client.DeleteChannelsNotIn(usernames)
+}
+
+// UpdateRecordingThumbnails patches the thumbnail_url and sprite_url on an
+// existing recording row identified by filename.
+func UpdateRecordingThumbnails(filename, thumbnailURL, spriteURL string) error {
+	if thumbnailURL == "" && spriteURL == "" {
+		return nil
+	}
+	body, err := json.Marshal(map[string]string{
+		"thumbnail_url": thumbnailURL,
+		"sprite_url":    spriteURL,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	resp, err := supabaseRequest("PATCH",
+		fmt.Sprintf("/recordings?filename=eq.%s", url.QueryEscape(filename)),
+		body,
+	)
+	if err != nil {
+		return fmt.Errorf("patch request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
 }
 
 // DeleteVideoCompletely removes all data associated with a video:

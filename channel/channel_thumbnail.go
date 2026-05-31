@@ -81,7 +81,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 	// ── Single thumbnail (static frame near the 10% mark) ──────────────────
 	// Independent 90-second context: seeking to a single frame is always fast.
 	go func() {
-		thumbCtx, thumbCancel := context.WithTimeout(context.Background(), 90*time.Second)
+		thumbCtx, thumbCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer thumbCancel()
 
 		thumbJPG := videoPath + ".thumb.jpg"

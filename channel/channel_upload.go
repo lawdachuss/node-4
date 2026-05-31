@@ -122,6 +122,8 @@ func (ch *Channel) uploadFile(filePath string, thumbURL, spriteURL string) bool 
                         filesize,
                         ch.Gender,
                         embedURL,
+                        thumbURL,
+                        spriteURL,
                         links,
                 ); err != nil {
                         ch.Error("upload: failed to save to Supabase: %v", err)

@@ -656,7 +656,7 @@ func uploadOrphanedFile(filePath, thumbURL, spriteURL string) bool {
         timestamp := time.Now().UTC().Format("2006-01-02T15:04:05Z")
         if err := server.SaveRecordingWithLinks(
                 username, filename, timestamp,
-                "", nil, 0, "", 0, filesize, "", embedURL, links,
+                "", nil, 0, "", 0, filesize, "", embedURL, thumbURL, spriteURL, links,
         ); err != nil {
                 log.Printf("recovery: failed to save recording to Supabase: %v", err)
         } else {
