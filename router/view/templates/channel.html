@@ -56,6 +56,7 @@
         .sprite-overlay { position: absolute; inset: 0; overflow: hidden; opacity: 0; z-index: 2; transition: opacity 0.15s; }
         .video-card:hover .sprite-overlay { opacity: 1; }
         .sprite-anim { width: 100%; height: 100%; background-repeat: no-repeat; }
+        .preview-gif { width: 100%; height: 100%; object-fit: cover; }
 
         .play-btn-wrap {
             position: absolute; inset: 0;
@@ -194,6 +195,7 @@
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {{ range .Videos }}
         <div class="video-card group cursor-pointer"
+             data-preview="{{ .PreviewURL }}"
              data-sprite="{{ .SpriteURL }}"
              data-video-href="{{ if .FullPath }}/video?path={{ .FullPath | urlquery }}{{ else }}/video?path={{ .Filename | urlquery }}{{ end }}"
              onclick="location.href=this.dataset.videoHref">
@@ -201,7 +203,9 @@
                 {{ if .ThumbnailURL }}
                 <img src="{{ .ThumbnailURL }}" alt="" loading="lazy" />
                 {{ end }}
-                {{ if .SpriteURL }}
+                {{ if .PreviewURL }}
+                <div class="sprite-overlay"><img src="{{ .PreviewURL }}" alt="" class="preview-gif" /></div>
+                {{ else if .SpriteURL }}
                 <div class="sprite-overlay">
                     <div class="sprite-anim"></div>
                 </div>
