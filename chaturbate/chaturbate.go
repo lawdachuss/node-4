@@ -211,6 +211,9 @@ func fetchStream(ctx context.Context, client *internal.Req, username string, roo
 		}
 	}
 
+	// Debug logging for troubleshooting
+	fmt.Printf("[DEBUG] %s POST API response: status=%s url=%s\n", username, resp.RoomStatus, resp.StreamURL())
+
 	// Enrich metadata from the GET API (chatvideocontext) which reliably
 	// returns tags, room_title, num_users, and broadcaster_gender even when
 	// the POST endpoint only returns the HLS URL.
@@ -243,6 +246,7 @@ func fetchStream(ctx context.Context, client *internal.Req, username string, roo
 
 	// If POST API returned a public room but no HLS source, fall back to GET API.
 	if resp.StreamURL() == "" {
+		fmt.Printf("[WARN] %s: POST API returned empty URL, trying GET API fallback (check cookies if this persists)\n", username)
 		getResp, apiErr := fetchAPIResponse(ctx, client, username)
 		if apiErr == nil && getResp.StreamURL() != "" {
 			resp = *getResp

@@ -109,7 +109,14 @@ func PostChaturbateAPI(ctx context.Context, username string) (string, error) {
 
 		if resp.StatusCode == 403 {
 			ReportChaturbateFailure()
+			fmt.Printf("[DEBUG] POST API 403 response for %s: %s\n", username, bodyStr)
 			return retry.Unrecoverable(fmt.Errorf("forbidden: %w", ErrPrivateStream))
+		}
+
+		if resp.StatusCode != 200 {
+			ReportChaturbateFailure()
+			fmt.Printf("[DEBUG] POST API status %d for %s: %s\n", resp.StatusCode, username, bodyStr)
+			return fmt.Errorf("unexpected status %d", resp.StatusCode)
 		}
 
 		ReportChaturbateSuccess()
