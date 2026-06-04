@@ -105,9 +105,32 @@ def main():
         if not user_agent:
             user_agent = val.get("user_agent", "")
 
+    # --- If no cookies in Supabase, seed from .env ---
     if not cookie_str:
-        print("  [SKIP] No cookies found in Supabase — nothing to refresh")
-        return
+        env_cookies = os.environ.get("COOKIES", "")
+        if env_cookies:
+            print("  No cookies in Supabase — seeding from .env...")
+            cookie_str = env_cookies
+            if not user_agent:
+                user_agent = os.environ.get(
+                    "USER_AGENT",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/146.0.0.0 Safari/537.36",
+                )
+            # Save .env cookies to Supabase immediately so DVR can use them even if refresh fails
+            seed_value = {
+                "cookies": cookie_str,
+                "user_agent": user_agent,
+            }
+            for key in ("sessionid", "csrftoken", "cf_clearance"):
+                val = extract_single_cookie(cookie_str, key)
+                if val:
+                    seed_value[key] = val
+            save_to_supabase(rest, supabase_key, seed_value, is_seed=True)
+        else:
+            print("  [SKIP] No cookies found in Supabase or .env")
+            return
 
     if not user_agent:
         user_agent = (
@@ -203,28 +226,44 @@ def main():
         if key in merged:
             settings_value[key] = merged[key]
 
+    save_to_supabase(rest, supabase_key, settings_value)
+
+
+def extract_single_cookie(cookie_str, name):
+    for pair in cookie_str.split(";"):
+        pair = pair.strip()
+        if "=" in pair:
+            k, _, v = pair.partition("=")
+            if k.strip() == name:
+                return v.strip()
+    return None
+
+
+def save_to_supabase(rest, api_key, value, is_seed=False):
     patch_url = f"{rest}/app_settings?key=eq.dvr_settings"
-    result = supabase_request("PATCH", patch_url, supabase_key, {"value": settings_value})
+    result = supabase_request("PATCH", patch_url, api_key, {"value": value})
 
     if result is not None:
-        print("  [OK] Cookies saved to Supabase")
+        label = "seeded" if is_seed else "saved"
+        print(f"  [OK] Cookies {label} to Supabase")
     else:
-        print("  Row may not exist yet, trying INSERT...")
+        label = "seed" if is_seed else "save"
+        print(f"  Row may not exist, trying INSERT for {label}...")
         result = supabase_request(
             "POST",
             f"{rest}/app_settings",
-            supabase_key,
-            {"key": "dvr_settings", "value": settings_value},
+            api_key,
+            {"key": "dvr_settings", "value": value},
         )
         if result is not None:
-            print("  [OK] Cookies inserted into Supabase")
+            print(f"  [OK] Cookies {label}d into Supabase")
         else:
-            print("  [ERROR] Failed to save cookies to Supabase")
-            sys.exit(1)
+            print(f"  [ERROR] Failed to {label} cookies to Supabase")
+            if not is_seed:
+                sys.exit(1)
 
-    print("\n" + "=" * 50)
-    print("  Cookie refresh complete")
-    print("=" * 50)
+    if is_seed and result is not None:
+        print("  Now proceeding to refresh cf_clearance via Scrapling...")
 
 
 if __name__ == "__main__":
