@@ -1,10 +1,12 @@
 package router
 
 import (
+        "context"
         "encoding/json"
         "fmt"
         "html/template"
         "io"
+        "log"
         "mime"
         "net/http"
         "os"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/teacat/chaturbate-dvr/channel"
+	"github.com/teacat/chaturbate-dvr/config"
 	"github.com/teacat/chaturbate-dvr/entity"
         "github.com/teacat/chaturbate-dvr/internal"
         "github.com/teacat/chaturbate-dvr/server"
@@ -61,6 +64,7 @@ func Index(c *gin.Context) {
 
 // CreateChannelRequest represents the request body for creating a channel.
 type CreateChannelRequest struct {
+        Site        string `form:"site"`
         Username    string `form:"username" binding:"required"`
         Framerate   int    `form:"framerate" binding:"required"`
         Resolution  int    `form:"resolution" binding:"required"`
@@ -81,6 +85,7 @@ func CreateChannel(c *gin.Context) {
         var lastErr error
         for _, username := range strings.Split(req.Username, ",") {
                 if err := server.Manager.CreateChannel(&entity.ChannelConfig{
+                        Site:        req.Site,
                         Username:    username,
                         Framerate:   req.Framerate,
                         Resolution:  req.Resolution,
@@ -152,6 +157,7 @@ type UpdateConfigRequest struct {
 	MixdropEmail    string `json:"mixdrop_email" form:"mixdrop_email"`
 	MixdropToken    string `json:"mixdrop_token" form:"mixdrop_token"`
 	PixeldrainToken string `json:"pixeldrain_token" form:"pixeldrain_token"`
+	StripchatPDKey  string `json:"stripchat_pdkey" form:"stripchat_pdkey"`
 }
 
 // UpdateConfig updates the server configuration from the Web UI form or API POST.
@@ -208,6 +214,12 @@ func UpdateConfig(c *gin.Context) {
 		server.Config.Cookies = strings.Join(parts, "; ")
 	}
 	server.ConfigMu.Unlock()
+
+        if req.StripchatPDKey != "" {
+                server.ConfigMu.Lock()
+                server.Config.StripchatPDKey = req.StripchatPDKey
+                server.ConfigMu.Unlock()
+        }
 
         // Update uploader credentials (Streamtape / Mixdrop / PixelDrain)
         if req.StreamtapeLogin != "" || req.StreamtapeKey != "" || req.MixdropEmail != "" || req.MixdropToken != "" || req.PixeldrainToken != "" {
@@ -879,8 +891,112 @@ func RetryOrphan(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"results": results})
 }
 
-// DeleteOrphans deletes orphan files from disk.  Expects JSON body:
-// {"paths": ["/path/to/file.mp4", ...]}.
+var (
+	thumbCacheMu sync.Mutex
+	thumbCache   = map[string]thumbCacheEntry{}
+)
+
+type thumbCacheEntry struct {
+	data      []byte
+	contentType string
+	expiresAt time.Time
+}
+
+// ServeLiveThumb serves a live thumbnail for a channel.  It tries to extract a
+// frame from the most recent recording file (a true stream snapshot, like
+// Chaturbate's ri/{username}.jpg).  Falls back to the upstream CDN preview URL
+// if no recording file is available.
+func ServeLiveThumb(c *gin.Context) {
+	username := c.Param("username")
+
+	// Check cache first.
+	thumbCacheMu.Lock()
+	entry, cached := thumbCache[username]
+	thumbCacheMu.Unlock()
+	if cached && time.Now().Before(entry.expiresAt) {
+		c.Data(http.StatusOK, entry.contentType, entry.data)
+		return
+	}
+
+	// Try to extract a frame from the most recent recording file.
+	videoDir := server.Config.OutputDir
+	if videoDir == "" {
+		videoDir = "videos"
+	}
+	pattern := filepath.Join(videoDir, username+"_*.mp4")
+	matches, _ := filepath.Glob(pattern)
+	var newest string
+	var newestMod time.Time
+	for _, m := range matches {
+		st, err := os.Stat(m)
+		if err != nil || st.Size() < 100*1024 {
+			continue
+		}
+		if st.ModTime().After(newestMod) {
+			newest = m
+			newestMod = st.ModTime()
+		}
+	}
+
+	// Only extract from files being actively recorded (< 60s since last write).
+	if newest != "" && time.Since(newestMod) < 60*time.Second {
+		cachePath := filepath.Join(os.TempDir(), "opencode-thumb-"+username+".jpg")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		config.AcquireFFmpeg()
+		err := config.FFmpegCommandContext(ctx,
+			"-y",
+			"-ss", "00:00:01",
+			"-i", newest,
+			"-vframes", "1",
+			"-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+			"-q:v", "2",
+			cachePath,
+		).Run()
+		config.ReleaseFFmpeg()
+		cancel()
+		if err == nil {
+			data, readErr := os.ReadFile(cachePath)
+			if readErr == nil {
+				ct := http.DetectContentType(data)
+				thumbCacheMu.Lock()
+				thumbCache[username] = thumbCacheEntry{data: data, contentType: ct, expiresAt: time.Now().Add(5 * time.Second)}
+				thumbCacheMu.Unlock()
+				c.Data(http.StatusOK, ct, data)
+				return
+			}
+		}
+	}
+
+	// Fall back to upstream CDN preview.
+	var liveThumbURL string
+	for _, ch := range server.Manager.ChannelInfo() {
+		if ch.Username == username {
+			liveThumbURL = ch.LiveThumbURL
+			break
+		}
+	}
+	if liveThumbURL == "" {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	client := internal.NewReq()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	data, err := client.GetBytes(ctx, liveThumbURL)
+	if err != nil {
+		log.Printf("[thumb:proxy] fetch for %s: %v", username, err)
+		c.Status(http.StatusGatewayTimeout)
+		return
+	}
+
+	ct := http.DetectContentType(data)
+	thumbCacheMu.Lock()
+	thumbCache[username] = thumbCacheEntry{data: data, contentType: ct, expiresAt: time.Now().Add(30 * time.Second)}
+	thumbCacheMu.Unlock()
+	c.Data(http.StatusOK, ct, data)
+}
+
 func DeleteOrphans(c *gin.Context) {
 	var req struct {
 		Paths []string `json:"paths"`

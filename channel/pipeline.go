@@ -1,0 +1,602 @@
+package channel
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/teacat/chaturbate-dvr/database"
+	"github.com/teacat/chaturbate-dvr/internal"
+	"github.com/teacat/chaturbate-dvr/server"
+	"github.com/teacat/chaturbate-dvr/uploader"
+)
+
+// Stage represents a processing stage in a file pipeline.
+type Stage int
+
+const (
+	StageThumbnailUpload Stage = iota // generate thumbnails + upload video (in parallel)
+	StageSaveMetadata                 // save recording + links to Supabase
+	StageCleanup                      // delete all local files
+	StageDone                         // terminal — pipeline finished
+)
+
+var stageNames = map[Stage]string{
+	StageThumbnailUpload: "thumbnail_upload",
+	StageSaveMetadata:    "save_metadata",
+	StageCleanup:         "cleanup",
+	StageDone:            "done",
+}
+
+func (s Stage) String() string { return stageNames[s] }
+
+func stageFromString(s string) Stage {
+	for k, v := range stageNames {
+		if v == s {
+			return k
+		}
+	}
+	return StageThumbnailUpload
+}
+
+// Pipeline processes a single video file through all stages in order.
+// Each stage is independently retryable. State is persisted in Supabase
+// so interrupted pipelines resume on restart.
+type Pipeline struct {
+	FilePath string `json:"file_path"`
+	FileHash string `json:"file_hash"`
+	Filename string `json:"filename"`
+	Username string `json:"username"`
+	FileSize int64  `json:"file_size"`
+
+	CurrentStage Stage  `json:"current_stage"`
+	Failed       bool   `json:"failed"`
+	LastError    string `json:"last_error"`
+
+	// Results populated by stages, consumed by downstream stages
+	ThumbURL   string            `json:"thumb_url"`
+	SpriteURL  string            `json:"sprite_url"`
+	PreviewURL string            `json:"preview_url"`
+	EmbedURL   string            `json:"embed_url"`
+	Links      map[string]string `json:"links"` // host -> download URL
+
+	mu sync.Mutex
+}
+
+func newPipeline(filePath, fileHash, filename, username string, fileSize int64) *Pipeline {
+	return &Pipeline{
+		FilePath:     filePath,
+		FileHash:     fileHash,
+		Filename:     filename,
+		Username:     username,
+		FileSize:     fileSize,
+		CurrentStage: StageThumbnailUpload,
+		Links:        make(map[string]string),
+	}
+}
+
+// advanceTo moves the pipeline to a new stage.
+func (p *Pipeline) advanceTo(s Stage) {
+	p.mu.Lock()
+	p.CurrentStage = s
+	p.mu.Unlock()
+}
+
+// toDBState converts the Pipeline to a database.PipelineState for persistence.
+func (p *Pipeline) toDBState() *database.PipelineState {
+	linksJSON, _ := json.Marshal(p.Links)
+	return &database.PipelineState{
+		FileHash:     p.FileHash,
+		FilePath:     p.FilePath,
+		Filename:     p.Filename,
+		Username:     p.Username,
+		FileSize:     p.FileSize,
+		CurrentStage: p.CurrentStage.String(),
+		Failed:       p.Failed,
+		LastError:    p.LastError,
+		ThumbURL:     p.ThumbURL,
+		SpriteURL:    p.SpriteURL,
+		PreviewURL:   p.PreviewURL,
+		EmbedURL:     p.EmbedURL,
+		LinksJSON:    string(linksJSON),
+	}
+}
+
+// pipelineFromDBState converts a database.PipelineState back to a Pipeline.
+func pipelineFromDBState(s *database.PipelineState) *Pipeline {
+	p := &Pipeline{
+		FileHash:     s.FileHash,
+		FilePath:     s.FilePath,
+		Filename:     s.Filename,
+		Username:     s.Username,
+		FileSize:     s.FileSize,
+		CurrentStage: stageFromString(s.CurrentStage),
+		Failed:       s.Failed,
+		LastError:    s.LastError,
+		ThumbURL:     s.ThumbURL,
+		SpriteURL:    s.SpriteURL,
+		PreviewURL:   s.PreviewURL,
+		EmbedURL:     s.EmbedURL,
+		Links:        make(map[string]string),
+	}
+	if s.LinksJSON != "" {
+		json.Unmarshal([]byte(s.LinksJSON), &p.Links)
+	}
+	return p
+}
+
+// stageThumbnail generates thumbnails, sprite, preview and uploads to Pixhost.
+// Does NOT advance the pipeline stage — the caller (processPipeline) manages
+// stage transitions after both thumbnail and upload finish in parallel.
+func (p *Pipeline) stageThumbnail(ch *Channel) error {
+	if p.ThumbURL != "" && p.SpriteURL != "" && p.PreviewURL != "" {
+		return nil
+	}
+	thumbURL, spriteURL, previewURL := ch.generateThumbnail(p.FilePath)
+	if thumbURL == "" && spriteURL == "" && previewURL == "" {
+		return nil
+	}
+	p.ThumbURL = thumbURL
+	p.SpriteURL = spriteURL
+	p.PreviewURL = previewURL
+	return nil
+}
+
+// stageUploadVideos uploads the video file to all configured hosts.
+// Uses the upload journal to skip hosts that already have the file.
+// Does NOT advance the pipeline stage — the caller manages stage transitions.
+func (p *Pipeline) stageUploadVideos(ch *Channel) error {
+	cfg := server.Config
+	if cfg == nil {
+		return nil
+	}
+
+	filename := p.Filename
+	filePath := p.FilePath
+
+	if _, err := os.Stat(filePath); err != nil {
+		ch.Error("upload: file not found %s: %v", filename, err)
+		return err
+	}
+
+	// Load completed hosts from journal
+	var completedHosts []string
+	if p.FileHash != "" {
+		var loadErr error
+		completedHosts, loadErr = server.LoadCompletedHosts(p.FileHash)
+		if loadErr != nil {
+			ch.Warn("upload: could not load journal for %s: %v", filename, loadErr)
+		}
+	}
+
+	upl := uploader.NewMultiHostUploader(
+		cfg.VoeSXAPIKey,
+		cfg.StreamtapeLogin,
+		cfg.StreamtapeKey,
+		cfg.MixdropEmail,
+		cfg.MixdropToken,
+		cfg.PixelDrainToken,
+		ch,
+	)
+
+	allHosts := upl.AvailableHosts()
+	if len(allHosts) == 0 {
+		ch.Warn("upload: no hosts configured for %s", filename)
+		return nil
+	}
+
+	hostsToTry := allHosts
+	if len(completedHosts) > 0 {
+		hostsToTry = difference(allHosts, completedHosts)
+		if len(hostsToTry) == 0 {
+			ch.Info("upload: all hosts already have %s per journal", filename)
+			return nil
+		}
+		ch.Info("upload: %d/%d hosts already have this file — uploading to %d remaining",
+			len(completedHosts), len(allHosts), len(hostsToTry))
+	}
+
+	var results []uploader.UploadResult
+	var success []uploader.UploadResult
+	for attempt := 1; attempt <= maxChannelUploadAttempts; attempt++ {
+		if attempt > 1 && len(hostsToTry) == 0 {
+			break
+		}
+		var attemptResults []uploader.UploadResult
+		attemptResults = upl.UploadSelected(filePath, hostsToTry)
+		results = append(results, attemptResults...)
+
+		if p.FileHash != "" {
+			stat, _ := os.Stat(filePath)
+			var filesize int64
+			if stat != nil {
+				filesize = stat.Size()
+			}
+			for _, r := range attemptResults {
+				status := "success"
+				errMsg := ""
+				if r.Error != nil {
+					status = "failed"
+					errMsg = r.Error.Error()
+				}
+				if jErr := server.SaveJournalEntry(p.FileHash, filename, r.Host, status, filesize, errMsg); jErr != nil {
+					ch.Warn("upload: could not save journal for %s/%s: %v", r.Host, filename, jErr)
+				}
+			}
+		}
+
+		success = uploader.GetSuccessfulUploads(results)
+		if len(success) >= len(allHosts) {
+			break
+		}
+
+		if attempt < maxChannelUploadAttempts {
+			failedHosts := failedHostNames(results, completedHosts)
+			hostsToTry = failedHosts
+			if len(hostsToTry) > 0 {
+				ch.Warn("upload: %d hosts still pending — retrying in %ds (attempt %d/%d)",
+					len(hostsToTry), int(channelUploadRetryDelay.Seconds()), attempt+1, maxChannelUploadAttempts)
+				time.Sleep(channelUploadRetryDelay)
+			}
+		}
+	}
+
+	if len(success) == 0 {
+		ch.Error("upload: all hosts failed for %s", filename)
+		return nil
+	}
+
+	// Store results
+	for _, r := range success {
+		p.Links[r.Host] = r.DownloadLink
+		if p.EmbedURL == "" {
+			p.EmbedURL = embedURLFromLink(r.Host, r.DownloadLink)
+		}
+	}
+
+	if len(results) > 0 {
+		ch.Info("upload: finished — %d/%d hosts succeeded", len(success), len(allHosts))
+		results = deduplicateResults(results)
+		for _, r := range results {
+			if r.Error != nil {
+				ch.Error("upload: [%s] failed: %s", r.Host, r.Error.Error())
+			} else {
+				ch.Info("upload: [%s] done — %s", r.Host, r.DownloadLink)
+			}
+		}
+	}
+
+	p.FileSize, _ = func() (int64, error) {
+		stat, err := os.Stat(filePath)
+		if err != nil {
+			return 0, err
+		}
+		return stat.Size(), nil
+	}()
+
+	return nil
+}
+
+// stageSaveMetadata persists recording metadata and all links to Supabase.
+func (p *Pipeline) stageSaveMetadata(ch *Channel) error {
+	if p.ThumbURL != "" || p.SpriteURL != "" || p.PreviewURL != "" {
+		if err := server.SavePreviewLinks(p.Filename, p.ThumbURL, p.SpriteURL, p.PreviewURL); err != nil {
+			ch.Error("upload: could not save preview links for %s: %v", p.Filename, err)
+			p.LastError = err.Error()
+			return err
+		}
+		ch.Info("upload: saved preview links for %s", p.Filename)
+	}
+
+	if len(p.Links) == 0 {
+		ch.Warn("upload: no upload links to save for %s — skipping metadata", p.Filename)
+		return nil
+	}
+
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	if err := server.SaveRecordingWithLinks(
+		ch.Config.Username,
+		p.Filename,
+		timestamp,
+		ch.RoomTitle,
+		ch.Tags,
+		ch.Viewers,
+		ch.Resolution,
+		ch.Framerate,
+		p.FileSize,
+		ch.Gender,
+		p.EmbedURL,
+		p.ThumbURL,
+		p.SpriteURL,
+		p.PreviewURL,
+		p.Links,
+	); err != nil {
+		ch.Error("upload: failed to save to Supabase: %v", err)
+		// Journal entries prevent retry — clean them so upload generates fresh links.
+		if p.FileHash != "" {
+			ch.Warn("upload: removing journal for %s so upload retries", p.Filename)
+			if jErr := server.DeleteJournalByHash(p.FileHash); jErr != nil {
+				ch.Warn("upload: could not delete journal for %s: %v", p.Filename, jErr)
+			}
+		}
+		p.LastError = err.Error()
+		return err
+	}
+
+	ch.Info("upload: saved recording metadata to Supabase for %s", p.Filename)
+	return nil
+}
+
+// stageCleanup removes all local files once everything is persisted upstream.
+func (p *Pipeline) stageCleanup(ch *Channel) error {
+	cfg := server.Config
+	if cfg == nil || !cfg.DeleteLocalAfterUpload {
+		ch.Info("cleanup: delete after upload disabled — keeping %s", p.Filename)
+		return nil
+	}
+
+	ch.Info("cleanup: removing local files for %s", p.Filename)
+	if err := os.Remove(p.FilePath); err != nil && !os.IsNotExist(err) {
+		ch.Error("cleanup: could not remove %s: %v", p.Filename, err)
+		p.LastError = err.Error()
+		return err
+	}
+	DeleteSidecarFiles(p.FilePath)
+	if p.FileHash != "" {
+		if jErr := server.DeleteJournalByHash(p.FileHash); jErr != nil {
+			ch.Warn("cleanup: could not delete journal for %s: %v", p.Filename, jErr)
+		}
+	}
+	ch.Info("cleanup: removed local files for %s", p.Filename)
+	return nil
+}
+
+// PipelineQueue manages a per-channel ordered queue of pipelines.
+// Pipelines are processed sequentially (one at a time per channel).
+type PipelineQueue struct {
+	pipelines []*Pipeline
+	mu        sync.Mutex
+	cond      *sync.Cond
+	wg        sync.WaitGroup
+	stopped   bool
+	started   bool // tracks whether the worker goroutine has been launched
+
+	ch        *Channel
+}
+
+// NewPipelineQueue creates a new pipeline queue for a channel.
+func NewPipelineQueue(ch *Channel) *PipelineQueue {
+	pq := &PipelineQueue{ch: ch}
+	pq.cond = sync.NewCond(&pq.mu)
+	return pq
+}
+
+// startOnce launches the worker goroutine on first use.
+func (pq *PipelineQueue) startOnce() {
+	pq.mu.Lock()
+	if !pq.started {
+		pq.started = true
+		pq.mu.Unlock()
+		pq.wg.Add(1)
+		go pq.processLoop()
+		return
+	}
+	pq.mu.Unlock()
+}
+
+// Enqueue adds a pipeline for processing. It persists the initial state
+// to Supabase so interrupted pipelines can be recovered on restart.
+func (pq *PipelineQueue) Enqueue(p *Pipeline) {
+	pq.startOnce()
+	if hErr := server.SavePipelineState(p.toDBState()); hErr != nil {
+		pq.ch.Warn("pipeline: could not persist initial state for %s: %v", p.Filename, hErr)
+	}
+	pq.mu.Lock()
+	pq.pipelines = append(pq.pipelines, p)
+	pq.mu.Unlock()
+	pq.cond.Signal()
+}
+
+// Start launches the worker goroutine that processes pipelines.
+func (pq *PipelineQueue) Start() {
+	pq.wg.Add(1)
+	go pq.processLoop()
+}
+
+// Stop signals the worker to finish after draining the queue.
+func (pq *PipelineQueue) Stop() {
+	pq.mu.Lock()
+	pq.stopped = true
+	pq.mu.Unlock()
+	pq.cond.Broadcast()
+	pq.wg.Wait()
+}
+
+// processLoop is the worker goroutine that processes pipelines sequentially.
+func (pq *PipelineQueue) processLoop() {
+	defer pq.wg.Done()
+	for {
+		pq.mu.Lock()
+		for len(pq.pipelines) == 0 && !pq.stopped {
+			pq.cond.Wait()
+		}
+		if pq.stopped {
+			pq.mu.Unlock()
+			return
+		}
+		p := pq.pipelines[0]
+		pq.pipelines = pq.pipelines[1:]
+		pq.mu.Unlock()
+
+		pq.processPipeline(p)
+	}
+}
+
+// processPipeline runs a single pipeline through all stages.
+// Thumbnail generation and video upload run in parallel goroutines to
+// minimize wall-clock time per file.  Both must finish before metadata
+// can be saved.
+func (pq *PipelineQueue) processPipeline(p *Pipeline) {
+	ch := pq.ch
+	filename := p.Filename
+	ch.Info("pipeline: processing %s (starting at stage %s)", filename, p.CurrentStage)
+
+	defer func() {
+		if r := recover(); r != nil {
+			ch.Error("pipeline: panic processing %s: %v", filename, r)
+			p.Failed = true
+			p.LastError = fmt.Sprintf("panic: %v", r)
+		}
+		ch.UploadWg.Done()
+		if p.CurrentStage == StageDone || p.Failed {
+			if p.CurrentStage == StageDone {
+				if delErr := server.DeletePipelineState(p.FileHash); delErr != nil {
+					ch.Warn("pipeline: could not delete state for %s: %v", filename, delErr)
+				}
+			} else {
+				if saveErr := server.SavePipelineState(p.toDBState()); saveErr != nil {
+					ch.Warn("pipeline: could not persist state for %s: %v", filename, saveErr)
+				}
+			}
+			MarkUploadDone(p.FilePath)
+			if m := server.Manager; m != nil {
+				m.PublishLog(ch.Config.Username, fmt.Sprintf("[pipeline] %s finished (stage=%s, failed=%v)", filename, p.CurrentStage, p.Failed))
+			}
+		}
+	}()
+
+	defer func() {
+		if p.CurrentStage != StageDone {
+			if err := server.SavePipelineState(p.toDBState()); err != nil {
+				ch.Warn("pipeline: could not persist state for %s: %v", filename, err)
+			}
+		}
+	}()
+
+	// ── Stage: Thumbnail + Video Upload (parallel) ───────────────────────
+	if p.CurrentStage == StageThumbnailUpload {
+		ch.Info("pipeline: stage thumbnail_upload for %s", filename)
+
+		var wg sync.WaitGroup
+		var thumbErr error
+		var uploadErr error
+
+		// Start thumbnail generation + Pixhost upload in background
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			thumbErr = p.stageThumbnail(ch)
+		}()
+
+		// Start video upload in background (acquires UploadSem)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			UploadSem <- struct{}{}
+			uploadErr = p.stageUploadVideos(ch)
+			<-UploadSem
+		}()
+
+		// Wait for both to finish
+		wg.Wait()
+
+		if thumbErr != nil {
+			ch.Error("pipeline: thumbnail stage failed for %s: %v", filename, thumbErr)
+		}
+		if uploadErr != nil {
+			ch.Error("pipeline: upload stage failed for %s: %v", filename, uploadErr)
+		}
+
+		// Advance only if file still exists and we have something to show
+		if _, statErr := os.Stat(p.FilePath); statErr == nil {
+			p.advanceTo(StageSaveMetadata)
+		} else {
+			ch.Warn("pipeline: file %s disappeared during processing", filename)
+			p.advanceTo(StageCleanup)
+		}
+	}
+
+	// ── Stage: Save Metadata ─────────────────────────────────────────────
+	if p.CurrentStage == StageSaveMetadata {
+		ch.Info("pipeline: stage save_metadata for %s", filename)
+		if err := p.stageSaveMetadata(ch); err != nil {
+			ch.Error("pipeline: metadata stage failed for %s: %v", filename, err)
+		}
+		p.advanceTo(StageCleanup)
+	}
+
+	// ── Stage: Cleanup ───────────────────────────────────────────────────
+	if p.CurrentStage == StageCleanup {
+		ch.Info("pipeline: stage cleanup for %s", filename)
+		if err := p.stageCleanup(ch); err != nil {
+			ch.Error("pipeline: cleanup stage failed for %s: %v", filename, err)
+		}
+		p.advanceTo(StageDone)
+	}
+
+	if p.CurrentStage == StageDone {
+		ch.Info("pipeline: completed %s successfully", filename)
+	} else if !p.Failed {
+		ch.Info("pipeline: %s paused at stage %s (will retry)", filename, p.CurrentStage)
+	}
+}
+
+// EnqueueFile creates a pipeline for a finalized video file and adds it to the queue.
+func (pq *PipelineQueue) EnqueueFile(filePath string) {
+	base := filepath.Base(filePath)
+	if !videoExt(base) || isSidecar(base) {
+		return
+	}
+
+	MarkUploadInFlight(filePath)
+	pq.ch.UploadWg.Add(1)
+
+	fileHash, hashErr := internal.FastFileHash(filePath)
+	if hashErr != nil {
+		pq.ch.Warn("pipeline: could not hash %s (state persistence limited): %v", base, hashErr)
+	}
+
+	var fileSize int64
+	if stat, err := os.Stat(filePath); err == nil {
+		fileSize = stat.Size()
+	}
+
+	p := newPipeline(filePath, fileHash, base, pq.ch.Config.Username, fileSize)
+	pq.Enqueue(p)
+}
+
+// ResumePending loads incomplete pipelines from Supabase and re-queues them.
+func (pq *PipelineQueue) ResumePending() {
+	states, err := server.LoadAllPipelineStates()
+	if err != nil {
+		pq.ch.Warn("pipeline: could not load pending states: %v", err)
+		return
+	}
+	if len(states) == 0 {
+		return
+	}
+	pq.startOnce()
+	for _, s := range states {
+		if s.FileHash == "" {
+			continue
+		}
+		// Check file still exists
+		if _, statErr := os.Stat(s.FilePath); os.IsNotExist(statErr) {
+			if delErr := server.DeletePipelineState(s.FileHash); delErr != nil {
+				pq.ch.Warn("pipeline: could not delete stale state for %s: %v", s.Filename, delErr)
+			}
+			continue
+		}
+		p := pipelineFromDBState(&s)
+		MarkUploadInFlight(s.FilePath)
+		pq.ch.UploadWg.Add(1)
+		pq.ch.Info("pipeline: resuming %s at stage %s", s.Filename, s.CurrentStage)
+		pq.mu.Lock()
+		pq.pipelines = append(pq.pipelines, p)
+		pq.mu.Unlock()
+		pq.cond.Signal()
+	}
+}

@@ -537,23 +537,53 @@ func SaveRecordingWithLinks(username, filename, timestamp, roomTitle string, tag
                 return fmt.Errorf("get recording after save: %w", err)
         }
 
-        // Save upload links — fail the whole operation if any link fails.
-        // Partial saves silently lose data, so we treat a single link failure
-        // as a hard error and skip saving all remaining links.  The caller can
-        // retry from scratch on the next restart or iteration.
+        // Save upload links — batch upsert is atomic: either all succeed or
+        // none do, so partial failures cannot orphan individual host URLs.
+        var uploadLinks []database.UploadLink
         for host, url := range links {
-                link := &database.UploadLink{
+                uploadLinks = append(uploadLinks, database.UploadLink{
                         RecordingID: savedRec.ID,
                         Host:        host,
                         URL:         url,
-                }
-                if err := client.SaveUploadLink(link); err != nil {
-                        return fmt.Errorf("save upload link %s: %w", host, err)
+                })
+        }
+        if len(uploadLinks) > 0 {
+                if err := client.SaveUploadLinks(uploadLinks); err != nil {
+                        return fmt.Errorf("save upload links: %w", err)
                 }
         }
 
         cacheClear()
         return nil
+}
+
+// ─── Pipeline States ──────────────────────────────────────────────────────────
+
+// SavePipelineState persists the current pipeline state for crash recovery.
+func SavePipelineState(state *database.PipelineState) error {
+	client := GetDBClient()
+	if client == nil {
+		return nil
+	}
+	return client.SavePipelineState(state)
+}
+
+// LoadAllPipelineStates returns all incomplete pipeline states for recovery.
+func LoadAllPipelineStates() ([]database.PipelineState, error) {
+	client := GetDBClient()
+	if client == nil {
+		return nil, nil
+	}
+	return client.LoadAllPipelineStates()
+}
+
+// DeletePipelineState removes a completed or failed pipeline state.
+func DeletePipelineState(fileHash string) error {
+	client := GetDBClient()
+	if client == nil {
+		return nil
+	}
+	return client.DeletePipelineState(fileHash)
 }
 
 // ─── Tunnels ──────────────────────────────────────────────────────────────────

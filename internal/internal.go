@@ -46,6 +46,10 @@ var (
 	segmentSeqTSRegexp = regexp.MustCompile(`_(\d+)\.ts$`)
 	// New LL-HLS format: seg_4_6543_video_11903984827994253865_llhls.m4s?session=xxx
 	segmentSeqM4SRegexp = regexp.MustCompile(`seg_\d+_(\d+)_`)
+	// Stripchat doppiocdn format: chunk_000.m4s
+	segmentSeqChunkRegexp = regexp.MustCompile(`chunk_(\d+)\.m4s$`)
+	// Stripchat mp4 segment format: streamId_seqNum_random_timestamp.mp4
+	segmentSeqStripchatRegexp = regexp.MustCompile(`_(\d+)_[A-Za-z0-9]+_\d+\.mp4$`)
 )
 
 // SegmentSeq extracts the segment sequence number from a filename.
@@ -58,6 +62,18 @@ func SegmentSeq(filename string) int {
 	}
 	// New LL-HLS format: seg_X_12345_video_xxx.m4s
 	if match := segmentSeqM4SRegexp.FindStringSubmatch(filename); len(match) > 1 {
+		if number, err := strconv.Atoi(match[1]); err == nil {
+			return number
+		}
+	}
+	// Stripchat doppiocdn format: chunk_000.m4s
+	if match := segmentSeqChunkRegexp.FindStringSubmatch(filename); len(match) > 1 {
+		if number, err := strconv.Atoi(match[1]); err == nil {
+			return number
+		}
+	}
+	// Stripchat mp4 format: streamId_12345_random_timestamp.mp4
+	if match := segmentSeqStripchatRegexp.FindStringSubmatch(filename); len(match) > 1 {
 		if number, err := strconv.Atoi(match[1]); err == nil {
 			return number
 		}

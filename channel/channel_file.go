@@ -176,16 +176,25 @@ func (ch *Channel) processPendingFile(pf pendingFile) {
 		return
 	}
 
-        // Single-stream file — move to output dir (triggers preview + upload).
-        if _, err := os.Stat(videoPath); err == nil {
-                if ch.Config.Compress {
-                        ch.CompressFile(videoPath)
-                } else if ch.handleMinDurationAndMerge(videoPath) {
-                        return // video was deferred to pending or merged+uploaded
-                } else {
-                        ch.MoveToOutputDir(videoPath)
-                }
-        }
+	// Single-stream file — move to output dir (triggers preview + upload).
+	if _, err := os.Stat(videoPath); err == nil {
+		if ch.Config.Compress {
+			if ch.handleMinDurationAndMerge(videoPath) {
+				return // video was deferred to pending or merged+uploaded
+			}
+			ch.CompressFile(videoPath)
+			return
+		} else if ch.handleMinDurationAndMerge(videoPath) {
+			return // video was deferred to pending or merged+uploaded
+		} else {
+			// Normalize fMP4 timestamps: Stripchat's LL-HLS segments carry
+			// absolute server timestamps (e.g. start at 5044s), making the
+			// file appear hours long.  A fast ffmpeg stream-copy remux resets
+			// the timeline.
+			normalized, _ := normalizeFMP4Timestamps(videoPath)
+			ch.MoveToOutputDir(normalized)
+		}
+	}
 }
 
 func (ch *Channel) processPendingMuxPair(videoPath, audioPath string) {
@@ -195,22 +204,28 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string) {
         switch {
         case videoInfo == nil && audioInfo == nil:
                 return
-        case videoInfo == nil:
-                ch.Info("mux: video track missing; preserving audio-only file %s", filepath.Base(audioPath))
-                if ch.Config.Compress {
-                        ch.CompressFile(audioPath)
-                } else {
-                        ch.MoveToOutputDir(audioPath)
-                }
-                return
-        case audioInfo == nil:
-                ch.Info("mux: audio track missing; preserving video-only file %s", filepath.Base(videoPath))
-                if ch.Config.Compress {
-                        ch.CompressFile(videoPath)
-                } else {
-                        ch.MoveToOutputDir(videoPath)
-                }
-                return
+	case videoInfo == nil:
+		ch.Info("mux: video track missing; preserving audio-only file %s", filepath.Base(audioPath))
+		if ch.handleMinDurationAndMerge(audioPath) {
+			return
+		}
+		if ch.Config.Compress {
+			ch.CompressFile(audioPath)
+		} else {
+			ch.MoveToOutputDir(audioPath)
+		}
+		return
+	case audioInfo == nil:
+		ch.Info("mux: audio track missing; preserving video-only file %s", filepath.Base(videoPath))
+		if ch.handleMinDurationAndMerge(videoPath) {
+			return
+		}
+		if ch.Config.Compress {
+			ch.CompressFile(videoPath)
+		} else {
+			ch.MoveToOutputDir(videoPath)
+		}
+		return
         }
 
 	// Both tracks exist — mux them together.
@@ -239,13 +254,16 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string) {
         ch.Info("delete: removed sidecar %s", filepath.Base(videoPath))
         ch.Info("delete: removed sidecar %s", filepath.Base(audioPath))
 
-        if ch.Config.Compress {
-                ch.CompressFile(finalOutput)
-        } else if ch.handleMinDurationAndMerge(finalOutput) {
-                return // video was deferred to pending or merged+uploaded
-        } else {
-                ch.MoveToOutputDir(finalOutput)
-        }
+	if ch.Config.Compress {
+		if ch.handleMinDurationAndMerge(finalOutput) {
+			return // video was deferred to pending or merged+uploaded
+		}
+		ch.CompressFile(finalOutput)
+	} else if ch.handleMinDurationAndMerge(finalOutput) {
+		return // video was deferred to pending or merged+uploaded
+	} else {
+		ch.MoveToOutputDir(finalOutput)
+	}
 }
 
 // muxOutputLooksValid returns true if the muxed MP4 exists and contains data.
@@ -285,31 +303,14 @@ func isSidecar(name string) bool {
 // MoveToOutputDir relocates a finalized recording into server.Config.OutputDir.
 // Errors are non-fatal: the recording is already safely written at srcPath.
 func (ch *Channel) MoveToOutputDir(srcPath string) string {
-	triggerUpload := func(filePath string) {
-		base := filepath.Base(filePath)
-		if !videoExt(base) || isSidecar(base) {
-			return
-		}
-		MarkUploadInFlight(filePath)
-		ch.UploadWg.Add(1)
-		go func() {
-			defer ch.UploadWg.Done()
-			defer MarkUploadDone(filePath)
-			defer func() {
-				if r := recover(); r != nil {
-					ch.Error("upload: panic in upload goroutine for %s: %v", filepath.Base(filePath), r)
-				}
-			}()
-			UploadSem <- struct{}{}
-			ch.uploadSem <- struct{}{}
-			defer func() { <-ch.uploadSem; <-UploadSem }()
-			thumbURL, spriteURL, previewURL := ch.generateThumbnail(filePath)
-			ch.uploadFile(filePath, thumbURL, spriteURL, previewURL)
-		}()
+	// Enqueue the file into the pipeline for thumbnail → upload → metadata → cleanup.
+	// The pipeline handles all lifecycle (semaphore, waitgroup, state persistence).
+	enqueue := func(filePath string) {
+		ch.PipelineQueue.EnqueueFile(filePath)
 	}
 
         if server.Config == nil || server.Config.OutputDir == "" {
-		triggerUpload(srcPath)
+		enqueue(srcPath)
 		return srcPath
         }
 
@@ -326,7 +327,7 @@ func (ch *Channel) MoveToOutputDir(srcPath string) string {
         ch.Info("output-dir: moving %s (%s) -> %s", filepath.Base(srcPath), resolvePathForLog(srcPath), destPath)
         if err := moveFile(srcPath, destPath); err != nil {
                 ch.Error("output-dir: move %s to %s: %s — uploading from original location (%s)", filepath.Base(srcPath), destDir, err.Error(), resolvePathForLog(srcPath))
-		triggerUpload(srcPath)
+		enqueue(srcPath)
                 return srcPath
         }
         // Verify the destination actually exists after the move — on some
@@ -336,11 +337,11 @@ func (ch *Channel) MoveToOutputDir(srcPath string) string {
         // the original location.
         if _, statErr := os.Stat(destPath); statErr != nil {
                 ch.Error("output-dir: post-move stat of dest %s failed: %v — uploading from original location (%s)", destPath, statErr, resolvePathForLog(srcPath))
-                triggerUpload(srcPath)
+                enqueue(srcPath)
                 return srcPath
         }
         ch.Info("output-dir: moved %s -> %s", filepath.Base(srcPath), destPath)
-	triggerUpload(destPath)
+	enqueue(destPath)
 	return destPath
 }
 
@@ -354,8 +355,7 @@ func resolvePathForLog(path string) string {
 }
 
 func (ch *Channel) generatePreviewAndUpload(filePath string) {
-	thumbURL, spriteURL, previewURL := ch.generateThumbnail(filePath)
-	ch.uploadFile(filePath, thumbURL, spriteURL, previewURL)
+	ch.PipelineQueue.EnqueueFile(filePath)
 }
 
 // uniqueDestPath returns path if it does not exist, otherwise appends
@@ -726,6 +726,36 @@ func muxVideoAudio(videoPath, audioPath, outputPath string) error {
                 outputPath,
         )
         return cmd.Run()
+}
+
+// normalizeFMP4Timestamps remuxes an fMP4 recording to reset the timeline.
+// Stripchat's LL-HLS segments carry absolute server timestamps (e.g. start at
+// 5044s), which makes the file appear hours long.  A fast stream-copy remux
+// with -movflags +faststart normalises the timestamps and moves the moov atom
+// to the front for immediate playback.  The original file is replaced.
+func normalizeFMP4Timestamps(videoPath string) (string, error) {
+	tmpPath := videoPath + ".normalized.mp4"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	config.AcquireFFmpeg()
+	defer config.ReleaseFFmpeg()
+	err := config.FFmpegCommandContext(ctx,
+		"-y",
+		"-i", videoPath,
+		"-c", "copy",
+		"-movflags", "+faststart",
+		tmpPath,
+	).Run()
+	if err != nil {
+		os.Remove(tmpPath)
+		return videoPath, err
+	}
+	if err := os.Rename(tmpPath, videoPath); err != nil {
+		os.Remove(tmpPath)
+		return videoPath, err
+	}
+	return videoPath, nil
 }
 
 // extractUsernameFromFilename parses "username_YYYY-MM-DD_HH-MM-SS.ext" to get the username.
@@ -1160,7 +1190,7 @@ func (ch *Channel) handleMinDurationAndMerge(videoPath string) bool {
 	// If multiple segments have now accumulated, merge them all and upload.
 	segments := collectPendingSegments(ch.Config.Username)
 	if len(segments) > 1 {
-		mergedPath := destPath + ".merged.mp4"
+		mergedPath := filepath.Join(os.TempDir(), "merged-"+ch.Config.Username+"-"+filepath.Base(destPath))
 		ch.Info("min-duration: merging %d pending segment(s)", len(segments))
 		if mErr := mergeVideos(segments, mergedPath); mErr != nil {
 			ch.Error("min-duration: merge failed: %v — segments remain pending for next recording", mErr)
@@ -1181,7 +1211,7 @@ func (ch *Channel) handleMinDurationAndMerge(videoPath string) bool {
 // run don't stay pending forever when no new recording arrives.
 func processAllPendingSegments() {
 	dirs := []string{"videos"}
-	if server.Config != nil && server.Config.OutputDir != "" {
+	if server.Config != nil && server.Config.OutputDir != "" && server.Config.OutputDir != "videos" {
 		dirs = append(dirs, server.Config.OutputDir)
 	}
 	for _, dir := range dirs {
@@ -1211,7 +1241,7 @@ func processAllPendingSegments() {
 				continue
 			}
 
-			mergedPath := segments[0] + ".merged.mp4"
+			mergedPath := filepath.Join(os.TempDir(), "merged-"+username+"-"+filepath.Base(segments[0]))
 			recoveryLogf(segments[0], "recovery: merging %d pending segments", len(segments))
 			if err := mergeVideos(segments, mergedPath); err != nil {
 				recoveryLogf(segments[0], "recovery: merge failed for %s: %v — uploading individually", username, err)

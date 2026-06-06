@@ -90,6 +90,9 @@ func SetupViews(r *gin.Engine) {
 	r.POST("/api/orphans/retry", RetryOrphan)
 	r.DELETE("/api/orphans", DeleteOrphans)
 
+	// Thumbnail proxy API
+	r.GET("/api/thumb/:username", ServeLiveThumb)
+
 	// Session control API
 	r.POST("/api/session/stop", TriggerSessionStop)
 

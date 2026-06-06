@@ -9,6 +9,11 @@ import (
         "time"
 )
 
+// mixdropSem limits concurrent uploads to Mixdrop.
+const mixdropSemCap = 2
+
+var mixdropSem = make(chan struct{}, mixdropSemCap)
+
 // MixdropUploader handles uploading files to Mixdrop
 type MixdropUploader struct {
         email  string
@@ -49,7 +54,10 @@ type mixdropUploadResp struct {
 
 // Upload uploads a file to Mixdrop and returns the embed link
 func (u *MixdropUploader) Upload(filePath string) (string, error) {
-        // Credentials go in form fields only — no Authorization header.
+	mixdropSem <- struct{}{}
+	defer func() { <-mixdropSem }()
+
+	// Credentials go in form fields only — no Authorization header.
         // The API field is "key" (matches the env-var MIXDROP_KEY), not "token".
         // Build multipart body with exact Content-Length; Mixdrop's nginx proxy
         // rejects chunked transfer encoding with a 400.

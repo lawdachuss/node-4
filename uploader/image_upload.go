@@ -2,82 +2,37 @@ package uploader
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
-type imageHost struct {
-	name   string
-	upload func(string) (string, error)
-}
+// pixhostSem limits concurrent Pixhost.to uploads to avoid rate limiting.
+var pixhostSem = make(chan struct{}, 5)
 
-// MultiImageUploader uploads thumbnails/sprites in parallel to all hosts:
-// Freeimage → ImgBB → Catbox → Pixhost (NSFW fallback).
+// MultiImageUploader uploads thumbnails/sprites to Pixhost.to.
 type MultiImageUploader struct {
-	hosts []imageHost
+	pixhost *ThumbnailUploader
 }
 
-// NewMultiImageUploader creates the default thumbnail upload chain.
+// NewMultiImageUploader creates a new uploader backed by Pixhost.to.
 func NewMultiImageUploader() *MultiImageUploader {
-	freeimage := NewFreeimageUploader()
-	imgbb := NewImgBBUploader()
-	catbox := NewCatboxUploader()
-	pixhost := NewThumbnailUploader("")
-
-	hosts := []imageHost{
-		{name: "Freeimage", upload: freeimage.Upload},
-		{name: "ImgBB", upload: imgbb.Upload},
-		{name: "Catbox", upload: catbox.Upload},
-		{name: "Pixhost", upload: pixhost.Upload},
-	}
-
-	return &MultiImageUploader{hosts: hosts}
+	return &MultiImageUploader{pixhost: NewThumbnailUploader("")}
 }
 
-const (
-	imageUploadRetries    = 2
-	imageUploadBaseDelay  = 2 * time.Second
-)
-
-// Upload uploads to all hosts in parallel and returns the first success.
-// Retries the entire batch up to imageUploadRetries times with backoff.
+// Upload uploads a file to Pixhost.to and returns the URL.
 func (m *MultiImageUploader) Upload(filePath string) (url, host string, err error) {
-	type result struct {
-		url  string
-		host string
-		err  error
-	}
+	pixhostSem <- struct{}{}
+	defer func() { <-pixhostSem }()
 
-	var lastErrors []string
-	for attempt := 0; attempt <= imageUploadRetries; attempt++ {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(imageUploadBaseDelay * time.Duration(1<<(attempt-1)))
+			time.Sleep(time.Duration(1<<attempt) * time.Second)
 		}
-
-		ch := make(chan result, len(m.hosts))
-		for _, h := range m.hosts {
-			h := h
-			go func() {
-				u, e := h.upload(filePath)
-				ch <- result{url: u, host: h.name, err: e}
-			}()
+		u, err := m.pixhost.Upload(filePath)
+		if err == nil {
+			return u, "Pixhost", nil
 		}
-
-		var firstErr error
-		for i := 0; i < len(m.hosts); i++ {
-			res := <-ch
-			if res.err == nil {
-				return res.url, res.host, nil
-			}
-			lastErrors = append(lastErrors, fmt.Sprintf("%s: %v", res.host, res.err))
-			if firstErr == nil {
-				firstErr = res.err
-			}
-		}
-
-		if firstErr == nil {
-			return "", "", fmt.Errorf("no hosts configured")
-		}
+		lastErr = err
 	}
-	return "", "", fmt.Errorf("all image hosts failed after %d attempts: [%s]", imageUploadRetries+1, strings.Join(lastErrors, "; "))
+	return "", "", fmt.Errorf("pixhost: %w", lastErr)
 }

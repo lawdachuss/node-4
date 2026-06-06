@@ -83,7 +83,11 @@ func main() {
 				Name:    "username",
 				Aliases: []string{"u"},
 				Usage:   "The username of the channel to record",
-				Value:   "",
+			},
+			&cli.StringFlag{
+				Name:  "site",
+				Usage: "Site to record from: chaturbate or stripchat (default: chaturbate)",
+				Value: "chaturbate",
 			},
 			&cli.StringFlag{
 				Name:  "admin-username",
@@ -266,31 +270,7 @@ func main() {
 				EnvVars: []string{"PIXELDRAIN_TOKEN", "PIXELDRAIN_API_KEY"},
 				Value:   "",
 			},
-			&cli.StringFlag{
-				Name:    "github-token",
-				Usage:   "GitHub Personal Access Token for preview/sprite image uploads",
-				EnvVars: []string{"GITHUB_TOKEN"},
-				Value:   "",
-			},
-			&cli.StringFlag{
-				Name:    "github-repo",
-				Usage:   "GitHub repository for preview images (owner/repo)",
-				EnvVars: []string{"GITHUB_REPO"},
-				Value:   "",
-			},
-			&cli.StringFlag{
-				Name:    "github-branch",
-				Usage:   "GitHub branch for preview images (default: main)",
-				EnvVars: []string{"GITHUB_BRANCH"},
-				Value:   "main",
-			},
-			&cli.StringFlag{
-				Name:    "github-preview-path",
-				Usage:   "Path in GitHub repo for preview images (default: previews)",
-				EnvVars: []string{"GITHUB_PREVIEW_PATH"},
-				Value:   "previews",
-			},
-			&cli.StringFlag{
+		&cli.StringFlag{
 				Name:    "supabase-url",
 				Usage:   "Supabase project URL for remote data persistence (REST API fallback)",
 				EnvVars: []string{"SUPABASE_URL"},
@@ -302,6 +282,12 @@ func main() {
 				EnvVars: []string{"SUPABASE_API_KEY"},
 				Value:   "",
 			},
+		&cli.StringFlag{
+			Name:    "stripchat-pdkey",
+			Usage:   "MOUFLON v2 decryption key for Stripchat HLS streams",
+			EnvVars: []string{"STRIPCHAT_PDKEY"},
+			Value:   "",
+		},
 		},
 		Action: start,
 	}
@@ -443,15 +429,16 @@ func start(c *cli.Context) error {
 	channel.CleanupOrphanedFiles()
 	go server.StartDiskMonitor(diskMonitorStop)
 
-	if err := server.Manager.CreateChannel(&entity.ChannelConfig{
-		Username:    c.String("username"),
-		Framerate:   c.Int("framerate"),
-		Resolution:  c.Int("resolution"),
-		Pattern:     c.String("pattern"),
-		MaxDuration: c.Int("max-duration"),
-		MaxFilesize: c.Int("max-filesize"),
-		Compress:    c.Bool("compress"),
-	}, false); err != nil {
+		if err := server.Manager.CreateChannel(&entity.ChannelConfig{
+				Site:        c.String("site"),
+				Username:    c.String("username"),
+				Framerate:   c.Int("framerate"),
+				Resolution:  c.Int("resolution"),
+				Pattern:     c.String("pattern"),
+				MaxDuration: c.Int("max-duration"),
+				MaxFilesize: c.Int("max-filesize"),
+				Compress:    c.Bool("compress"),
+			}, false); err != nil {
 		return fmt.Errorf("create channel: %w", err)
 	}
 

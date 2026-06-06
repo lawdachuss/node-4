@@ -11,7 +11,11 @@ import (
 
 const (
 	voeSXAPIBase = "https://voe.sx/api"
+	// voeSXSem limits concurrent uploads to VOE.sx.
+	voeSXSemCap = 3
 )
+
+var voeSXSem = make(chan struct{}, voeSXSemCap)
 
 // VoeSXUploader handles uploading files to VOE.sx
 type VoeSXUploader struct {
@@ -24,7 +28,7 @@ func NewVoeSXUploader(apiKey string) *VoeSXUploader {
 	return &VoeSXUploader{
 		apiKey: apiKey,
 		client: &http.Client{
-			Timeout: 30 * time.Minute,
+			Timeout: 120 * time.Minute,
 			Transport: &http.Transport{
 				MaxIdleConns:        100,
 				MaxIdleConnsPerHost: 100,
@@ -61,6 +65,9 @@ func (u *VoeSXUploader) Upload(filePath string) (string, error) {
 	if u.apiKey == "" {
 		return "", fmt.Errorf("VOE.sx API key not configured")
 	}
+
+	voeSXSem <- struct{}{}
+	defer func() { <-voeSXSem }()
 
 	var lastErr error
 	

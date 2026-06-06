@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// pixeldrainSem limits concurrent uploads to PixelDrain.
+const pixeldrainSemCap = 2
+
+var pixeldrainSem = make(chan struct{}, pixeldrainSemCap)
+
 // PixeldrainUploader handles uploading files to PixelDrain
 type PixeldrainUploader struct {
 	token  string
@@ -42,6 +47,9 @@ func NewPixeldrainUploader(token string) *PixeldrainUploader {
 // file body and an explicit Content-Length. This avoids chunked transfer
 // encoding, which PixelDrain's API does not support reliably.
 func (u *PixeldrainUploader) Upload(filePath string) (string, error) {
+	pixeldrainSem <- struct{}{}
+	defer func() { <-pixeldrainSem }()
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)

@@ -18,6 +18,7 @@ const (
 // ChannelConfig represents the configuration for a channel.
 type ChannelConfig struct {
 	IsPaused                  atomic.Bool `json:"-"`
+	Site                      string      `json:"site"`       // "chaturbate" or "stripchat"
 	Username                  string      `json:"username"`
 	Framerate                 int         `json:"framerate"`
 	Resolution                int         `json:"resolution"`
@@ -32,6 +33,9 @@ type ChannelConfig struct {
 func (c *ChannelConfig) Sanitize() {
 	c.Username = regexp.MustCompile(`[^a-zA-Z0-9_-]`).ReplaceAllString(c.Username, "")
 	c.Username = strings.TrimSpace(c.Username)
+	if c.Site == "" {
+		c.Site = "chaturbate"
+	}
 	if c.Resolution == 0 {
 		c.Resolution = 2160
 	}
@@ -55,6 +59,9 @@ type ChannelInfo struct {
 	IsCompressing bool
 	RoomStatus    string // public, private, group, away, offline, hidden
 	Username      string
+	Site          string // "chaturbate" or "stripchat"
+	SiteDomain    string // domain for channel link, e.g. "https://chaturbate.com/"
+	LiveThumbURL  string // live-updating thumbnail; empty = use platform default
 	Duration      string
 	Filesize      string
 	Filename      string
@@ -116,13 +123,10 @@ type Config struct {
 	MixdropToken      string
 	PixelDrainToken   string
 
-	GitHubToken       string
-	GitHubRepo        string
-	GitHubBranch      string
-	GitHubPreviewPath string
-
 	SupabaseURL    string
 	SupabaseAPIKey string
+
+	StripchatPDKey string
 
 	FFmpegPath string
 

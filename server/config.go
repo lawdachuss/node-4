@@ -23,6 +23,7 @@ type persistedSettings struct {
 	MixdropEmail    string `json:"mixdrop_email,omitempty"`
 	MixdropToken    string `json:"mixdrop_token,omitempty"`
 	PixelDrainToken string `json:"pixeldrain_token,omitempty"`
+	StripchatPDKey  string `json:"stripchat_pdkey,omitempty"`
 }
 
 // SaveSettings writes the runtime cookies and user-agent to Supabase.
@@ -39,6 +40,7 @@ func SaveSettings() error {
 		MixdropEmail:    Config.MixdropEmail,
 		MixdropToken:    Config.MixdropToken,
 		PixelDrainToken: Config.PixelDrainToken,
+		StripchatPDKey:  Config.StripchatPDKey,
 	}
 	ConfigMu.RUnlock()
 
@@ -95,6 +97,9 @@ func LoadSettings() error {
 	}
 	if s.PixelDrainToken != "" {
 		Config.PixelDrainToken = s.PixelDrainToken
+	}
+	if s.StripchatPDKey != "" {
+		Config.StripchatPDKey = s.StripchatPDKey
 	}
 
 	// Parse Config.Cookies back into individual fields if they are empty.

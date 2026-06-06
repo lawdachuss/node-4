@@ -1,3 +1,3 @@
 package channel
 
-var UploadSem = make(chan struct{}, 50)
+var UploadSem = make(chan struct{}, 100)

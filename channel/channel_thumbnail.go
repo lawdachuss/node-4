@@ -62,8 +62,15 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		return "", "", ""
 	}
 
-	if _, err := os.Stat(videoPath); err != nil {
+	st, err := os.Stat(videoPath)
+	if err != nil {
 		errFn("thumb: file not found %s: %v", filepath.Base(videoPath), err)
+		return "", "", ""
+	}
+	// Skip files too small to contain video frames — ffmpeg returns
+	// exit code -22 (EINVAL) on header-only fMP4 from failed streams.
+	if st.Size() < 100*1024 {
+		errFn("thumb: skipping %s: too small (%d bytes)", filepath.Base(videoPath), st.Size())
 		return "", "", ""
 	}
 

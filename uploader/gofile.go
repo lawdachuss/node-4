@@ -14,7 +14,11 @@ import (
 
 const (
 	gofileAPIBase = "https://api.gofile.io"
+	// gofileSem limits concurrent uploads to GoFile to avoid connection saturation.
+	gofileSemCap = 3
 )
+
+var gofileSem = make(chan struct{}, gofileSemCap)
 
 // GoFileUploader handles uploading files to GoFile.io
 type GoFileUploader struct {
@@ -25,12 +29,12 @@ type GoFileUploader struct {
 func NewGoFileUploader() *GoFileUploader {
 	return &GoFileUploader{
 		client: &http.Client{
-			Timeout: 30 * time.Minute, // Long timeout for large video uploads
+			Timeout: 120 * time.Minute, // Long timeout for large video uploads
 			Transport: &http.Transport{
 				MaxIdleConns:        100,
 				MaxIdleConnsPerHost: 100,
 				IdleConnTimeout:     90 * time.Second,
-				DisableCompression:  true, // Don't compress video files
+				DisableCompression:  true,
 				DialContext:         (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
 			},
 		},
@@ -61,6 +65,9 @@ type uploadResponse struct {
 
 // Upload uploads a file to GoFile and returns the download link
 func (u *GoFileUploader) Upload(filePath string) (string, error) {
+	gofileSem <- struct{}{}
+	defer func() { <-gofileSem }()
+
 	var downloadLink string
 	var lastErr error
 	

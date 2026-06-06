@@ -359,6 +359,22 @@ func (c *Client) SaveUploadLink(link *UploadLink) error {
         return nil
 }
 
+// SaveUploadLinks batch-saves all upload links in a single request.
+// Uses on_conflict to upsert by (recording_id, host).
+func (c *Client) SaveUploadLinks(links []UploadLink) error {
+        resp, err := c.requestWithRetry("POST", "/upload_links?on_conflict=recording_id,host", links)
+        if err != nil {
+                return err
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode >= 400 {
+                bodyBytes, _ := io.ReadAll(resp.Body)
+                return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+        }
+        return nil
+}
+
 // GetUploadLinks retrieves all upload links for a recording
 func (c *Client) GetUploadLinks(recordingID string) ([]UploadLink, error) {
 	var links []UploadLink
@@ -623,6 +639,74 @@ func (c *Client) GetJournalEntriesByStatus(status string) ([]UploadJournal, erro
 // DeleteJournalByHash removes all journal entries for a file hash (e.g. after local file is deleted).
 func (c *Client) DeleteJournalByHash(fileHash string) error {
         return c.delete(fmt.Sprintf("/upload_journal?file_hash=eq.%s", url.QueryEscape(fileHash)))
+}
+
+// ============================================================================
+// PIPELINE STATES
+// ============================================================================
+//
+// SQL migration (run once in Supabase SQL Editor):
+//
+//   CREATE TABLE pipeline_states (
+//       file_hash       TEXT PRIMARY KEY,
+//       file_path       TEXT NOT NULL,
+//       filename        TEXT NOT NULL,
+//       username        TEXT NOT NULL DEFAULT '',
+//       file_size       BIGINT DEFAULT 0,
+//       current_stage   TEXT NOT NULL DEFAULT 'thumbnail',
+//       failed          BOOLEAN DEFAULT FALSE,
+//       last_error      TEXT DEFAULT '',
+//       thumb_url       TEXT DEFAULT '',
+//       sprite_url      TEXT DEFAULT '',
+//       preview_url     TEXT DEFAULT '',
+//       embed_url       TEXT DEFAULT '',
+//       links           TEXT DEFAULT '{}',
+//       created_at      TIMESTAMPTZ DEFAULT NOW(),
+//       updated_at      TIMESTAMPTZ DEFAULT NOW()
+//   );
+
+type PipelineState struct {
+        FileHash     string `json:"file_hash"`
+        FilePath     string `json:"file_path"`
+        Filename     string `json:"filename"`
+        Username     string `json:"username"`
+        FileSize     int64  `json:"file_size"`
+        CurrentStage string `json:"current_stage"`
+        Failed       bool   `json:"failed"`
+        LastError    string `json:"last_error,omitempty"`
+        ThumbURL     string `json:"thumb_url,omitempty"`
+        SpriteURL    string `json:"sprite_url,omitempty"`
+        PreviewURL   string `json:"preview_url,omitempty"`
+        EmbedURL     string `json:"embed_url,omitempty"`
+        LinksJSON    string `json:"links,omitempty"` // JSON-encoded map[string]string
+        CreatedAt    string `json:"created_at,omitempty"`
+        UpdatedAt    string `json:"updated_at,omitempty"`
+}
+
+// SavePipelineState upserts a pipeline state by file_hash.
+func (c *Client) SavePipelineState(state *PipelineState) error {
+        resp, err := c.requestWithRetry("POST", "/pipeline_states?on_conflict=file_hash", state)
+        if err != nil {
+                return err
+        }
+        defer resp.Body.Close()
+        if resp.StatusCode >= 400 {
+                bodyBytes, _ := io.ReadAll(resp.Body)
+                return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+        }
+        return nil
+}
+
+// LoadAllPipelineStates retrieves all pipeline states (for crash recovery on restart).
+func (c *Client) LoadAllPipelineStates() ([]PipelineState, error) {
+        var states []PipelineState
+        err := c.get("/pipeline_states?order=created_at.asc", &states)
+        return states, err
+}
+
+// DeletePipelineState removes a pipeline state by file hash.
+func (c *Client) DeletePipelineState(fileHash string) error {
+        return c.delete(fmt.Sprintf("/pipeline_states?file_hash=eq.%s", url.QueryEscape(fileHash)))
 }
 
 // ============================================================================

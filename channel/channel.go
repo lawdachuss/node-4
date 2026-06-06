@@ -10,10 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/teacat/chaturbate-dvr/chaturbate"
 	"github.com/teacat/chaturbate-dvr/entity"
 	"github.com/teacat/chaturbate-dvr/internal"
 	"github.com/teacat/chaturbate-dvr/server"
+	"github.com/teacat/chaturbate-dvr/site"
+	"github.com/teacat/chaturbate-dvr/stripchat"
 )
 
 // pendingFile tracks a closed recording file awaiting post-processing
@@ -46,12 +47,13 @@ type Channel struct {
 
 	stateMu sync.Mutex // protects IsOnline, IsConnecting, RoomStatus, Duration, Filesize
 
-	RoomTitle  string   // captured from API at recording start
-	Tags       []string // captured from API at recording start
-	Viewers    int      // captured from API at recording start
-	Gender     string   // broadcaster_gender from Chaturbate API ("m", "f", "c", "t", …)
-	Resolution string   // actual stream resolution (e.g. "1920x1080")
-	Framerate  int      // actual stream framerate (e.g. 30)
+	RoomTitle     string   // captured from API at recording start
+	Tags          []string // captured from API at recording start
+	Viewers       int      // captured from API at recording start
+	Gender        string   // broadcaster_gender from Chaturbate API ("m", "f", "c", "t", …)
+	Resolution    string   // actual stream resolution (e.g. "1920x1080")
+	Framerate     int      // actual stream framerate (e.g. 30)
+	LiveThumbURL  string   // live thumbnail URL for the current stream
 
 	Logs   []string
 	logsMu sync.Mutex
@@ -71,6 +73,7 @@ type Channel struct {
 	UploadWg         sync.WaitGroup // tracks in-flight upload goroutines for graceful shutdown
 	monitorWg        sync.WaitGroup // tracks the Monitor goroutine lifetime
 	uploadSem        chan struct{}  // per-channel upload semaphore (1 at a time)
+	PipelineQueue    *PipelineQueue // ordered pipeline for thumbnails → upload → metadata → cleanup
 }
 
 // New creates a new channel instance with the given manager and configuration.
@@ -85,6 +88,7 @@ func New(conf *entity.ChannelConfig) *Channel {
 		uploadSem:       make(chan struct{}, 1),
 		RoomStatus:      "offline",
 	}
+	ch.PipelineQueue = NewPipelineQueue(ch)
 	go ch.Publisher()
 
 	return ch
@@ -216,6 +220,15 @@ func (ch *Channel) exportInfo(includeLogs bool) *entity.ChannelInfo {
 		ch.logsMu.Unlock()
 	}
 
+	siteName := ch.Config.Site
+	if siteName == "" {
+		siteName = "chaturbate"
+	}
+	siteDomain := server.Config.Domain
+	if siteName == "stripchat" {
+		siteDomain = "https://stripchat.com/"
+	}
+
 	return &entity.ChannelInfo{
 		IsOnline:      isOnline,
 		IsConnecting:  isConnecting,
@@ -223,6 +236,9 @@ func (ch *Channel) exportInfo(includeLogs bool) *entity.ChannelInfo {
 		IsCompressing: atomic.LoadInt32(&ch.CompressingCount) > 0,
 		RoomStatus:    roomStatus,
 		Username:      ch.Config.Username,
+		Site:          siteName,
+		SiteDomain:    siteDomain,
+		LiveThumbURL:  ch.LiveThumbURL,
 		MaxDuration:   internal.FormatDuration(float64(ch.Config.MaxDuration * 60)),
 		MaxFilesize:   internal.FormatFilesize(ch.Config.MaxFilesize * 1024 * 1024),
 		StreamedAt:    streamedAt,
@@ -276,6 +292,7 @@ func (ch *Channel) Stop() {
 	ch.PauseCancelFunc()
 	ch.cancelMu.Unlock()
 	ch.closeDone.Do(func() { close(ch.done) })
+	ch.PipelineQueue.Stop()
 	ch.Info("channel stopped")
 }
 
@@ -348,10 +365,21 @@ func (ch *Channel) SetConnecting(connecting bool) {
 	ch.Update()
 }
 
+// resolveSite returns the appropriate site.Site implementation for the channel.
+func resolveSite(ch *Channel) site.Site {
+	switch ch.Config.Site {
+	case "stripchat":
+		return stripchat.NewStripchatSite()
+	default:
+		return site.NewChaturbateSite()
+	}
+}
+
 // CheckOnlineWhilePaused periodically refreshes room status for paused channels
 // so the UI can still distinguish online/private/offline states.
 func (ch *Channel) CheckOnlineWhilePaused(ctx context.Context, startSeq int) {
-	client := chaturbate.NewClient()
+	siteImpl := resolveSite(ch)
+	req := internal.NewReq()
 	baseIntervalMinutes := max(server.Config.Interval, 15)
 
 	initialDelay := time.Duration(startSeq*5) * time.Second
@@ -370,13 +398,13 @@ func (ch *Channel) CheckOnlineWhilePaused(ctx context.Context, startSeq int) {
 	for {
 		waitInterval := time.Duration(baseIntervalMinutes) * time.Minute
 
-		status, err := client.GetRoomStatus(ctx, ch.Config.Username)
+		status, err := siteImpl.GetRoomStatus(ctx, req, ch.Config.Username)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
 		} else if status != "" {
-			isOnline := status != chaturbate.StatusAway && status != chaturbate.StatusOffline
+			isOnline := status != site.StatusAway && status != site.StatusOffline
 			ch.stateMu.Lock()
 			changed := ch.IsOnline != isOnline || ch.RoomStatus != status || ch.IsConnecting
 			if changed {

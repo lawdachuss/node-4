@@ -842,6 +842,27 @@
         </iframe>
     </div>
 </div>
+<div class="flex justify-end mb-4">
+    <div class="server-selector" id="server-selector">
+        <button class="server-btn" onclick="toggleServerMenu()" title="Switch server">
+            <span class="server-dot"></span>
+            <span class="server-name" id="current-server-name">Server</span>
+            <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div class="server-dropdown" id="server-dropdown">
+            <div class="server-dropdown-header">Servers</div>
+            {{ range .HostPlayers }}
+            <button class="server-option" data-server="{{ .Host }}" onclick="switchServer('{{ .Host }}')">
+                <span class="server-opt-dot {{ if .VideoURL }}online{{ else if .EmbedURL }}embed{{ else }}external{{ end }}"></span>
+                <div class="server-opt-info">
+                    <div class="server-opt-name">{{ .Host }}</div>
+                    <div class="server-opt-type">{{ if .VideoURL }}Direct stream{{ else if .EmbedURL }}Embed{{ else }}External link{{ end }}</div>
+                </div>
+            </button>
+            {{ end }}
+        </div>
+    </div>
+</div>
 
 {{ else }}
 <!-- ── UPLOADED / NO VIDEO ── -->
@@ -856,6 +877,27 @@
     {{ if .ThumbnailURL }}
     <img src="{{ .ThumbnailURL }}" alt="" class="mt-5 max-h-48 rounded-xl mx-auto object-cover opacity-50" />
     {{ end }}
+</div>
+<div class="flex justify-end mb-4">
+    <div class="server-selector" id="server-selector">
+        <button class="server-btn" onclick="toggleServerMenu()" title="Switch server">
+            <span class="server-dot"></span>
+            <span class="server-name" id="current-server-name">Server</span>
+            <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div class="server-dropdown" id="server-dropdown">
+            <div class="server-dropdown-header">Servers</div>
+            {{ range .HostPlayers }}
+            <button class="server-option" data-server="{{ .Host }}" onclick="switchServer('{{ .Host }}')">
+                <span class="server-opt-dot {{ if .VideoURL }}online{{ else if .EmbedURL }}embed{{ else }}external{{ end }}"></span>
+                <div class="server-opt-info">
+                    <div class="server-opt-name">{{ .Host }}</div>
+                    <div class="server-opt-type">{{ if .VideoURL }}Direct stream{{ else if .EmbedURL }}Embed{{ else }}External link{{ end }}</div>
+                </div>
+            </button>
+            {{ end }}
+        </div>
+    </div>
 </div>
 {{ end }}
 

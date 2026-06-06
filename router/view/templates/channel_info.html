@@ -11,11 +11,19 @@
 
   <!-- Thumbnail -->
   <div class="mb-4 rounded-xl overflow-hidden aspect-video relative group thumb-wrap">
-    <img src="https://thumb.live.mmcdn.com/ri/{{ .Username }}.jpg" decoding="async"
+    {{ if .LiveThumbURL }}
+    <img src="/api/thumb/{{ .Username }}" decoding="async"
          alt="{{ .Username }}"
          class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
          onerror="this.parentElement.style.display='flex';this.parentElement.style.alignItems='center';this.parentElement.style.justifyContent='center';this.style.display='none'"
          loading="lazy" />
+    {{ else }}
+    <div class="w-full h-full flex items-center justify-center" style="background:rgba(255,255,255,0.03)">
+      <svg class="w-10 h-10 text-zinc-700" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/>
+      </svg>
+    </div>
+    {{ end }}
     <!-- Gradient overlay -->
     <div class="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent pointer-events-none"></div>
     <!-- REC badge (after disconnect the dot disappears too) -->
@@ -88,7 +96,7 @@
       </svg>
       <div class="min-w-0">
         <div class="text-[9px] font-bold uppercase tracking-widest text-zinc-700 mb-0.5">Channel URL</div>
-        <a href="{{ .GlobalConfig.Domain }}{{ .Username }}" target="_blank" class="text-[11px] text-amber-400 hover:text-amber-300 underline break-all transition-colors">{{ .GlobalConfig.Domain }}{{ .Username }}</a>
+        <a href="{{ .SiteDomain }}{{ .Username }}" target="_blank" class="text-[11px] text-amber-400 hover:text-amber-300 underline break-all transition-colors">{{ .SiteDomain }}{{ .Username }}</a>
       </div>
     </div>
 

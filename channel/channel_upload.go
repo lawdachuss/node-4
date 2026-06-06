@@ -212,18 +212,24 @@ func (ch *Channel) uploadFile(filePath string, thumbURL, spriteURL, previewURL s
 			links,
 		); err != nil {
 			ch.Error("upload: failed to save to Supabase: %v", err)
+			// Journal entries were already saved — if we leave them, the upload
+			// will be skipped on restart even though the DB has no links.
+			// Clean up journals so the upload is retried from scratch.
+			if fileHash != "" {
+				ch.Warn("upload: removing journal for %s so upload retries", filename)
+				if jErr := server.DeleteJournalByHash(fileHash); jErr != nil {
+					ch.Warn("upload: could not delete journal for %s: %v", filename, jErr)
+				}
+			}
 		} else {
 			dbSaved = true
 			ch.Info("upload: saved recording metadata to Supabase for %s", filename)
 		}
 
-		// Delete local file only once ALL hosts have the file safely.
-		// Deleting prematurely when only some hosts succeeded would
-		// prevent retrying the failed hosts (the file is gone).
-		if server.Config != nil && server.Config.DeleteLocalAfterUpload && len(success) >= len(allHosts) {
-			if !dbSaved {
-				ch.Warn("upload: Supabase save failed — deleting local copy anyway (file is on remote host)")
-			}
+		// Delete local file only once ALL hosts have the file safely AND
+		// the metadata is persisted.  If the DB save failed, the journal
+		// was cleared above so the upload retries and generates fresh links.
+		if server.Config != nil && server.Config.DeleteLocalAfterUpload && len(success) >= len(allHosts) && dbSaved {
 			_ = os.Remove(filePath)
 			// Also clean up any associated preview sidecar files
 			for _, suffix := range []string{".thumb.jpg", ".sprite.jpg", ".preview.gif", ".thumb", ".sprite"} {

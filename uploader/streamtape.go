@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// streamtapeSem limits concurrent uploads to Streamtape.
+const streamtapeSemCap = 2
+
+var streamtapeSem = make(chan struct{}, streamtapeSemCap)
+
 // StreamtapeUploader handles uploading files to Streamtape
 type StreamtapeUploader struct {
 	login  string
@@ -57,6 +62,9 @@ type streamtapeUploadResp struct {
 
 // Upload uploads a file to Streamtape and returns the embed/view link
 func (u *StreamtapeUploader) Upload(filePath string) (string, error) {
+	streamtapeSem <- struct{}{}
+	defer func() { <-streamtapeSem }()
+
 	uploadURL, err := u.getUploadURL()
 	if err != nil {
 		return "", fmt.Errorf("get upload URL: %w", err)
