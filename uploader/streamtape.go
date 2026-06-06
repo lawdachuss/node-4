@@ -111,7 +111,7 @@ func (u *StreamtapeUploader) getUploadURL() (string, error) {
 
 func (u *StreamtapeUploader) uploadFile(filePath, uploadURL string) (string, error) {
 	// Build multipart body with exact Content-Length — Streamtape rejects chunked encoding.
-	body, contentLen, contentType, closer, err := multipartStream(nil, "file", filePath)
+	body, contentLen, contentType, closer, err := multipartStream(nil, "file", filePath, "Streamtape")
 	if err != nil {
 		return "", fmt.Errorf("build multipart: %w", err)
 	}

@@ -74,6 +74,13 @@ type Channel struct {
 	monitorWg        sync.WaitGroup // tracks the Monitor goroutine lifetime
 	uploadSem        chan struct{}  // per-channel upload semaphore (1 at a time)
 	PipelineQueue    *PipelineQueue // ordered pipeline for thumbnails → upload → metadata → cleanup
+
+	// Upload progress tracking — updated by the pipeline worker goroutine.
+	// Thread-safe via uploadStatusMu; visible in the UI via ExportInfo().
+	uploadStatusMu   sync.Mutex
+	UploadStatus     string  // human-readable status: "", "generating thumbnails…", "uploading (2/5 hosts)…"
+	UploadProgress   float64 // 0–100, best-effort estimate
+	UploadFilename   string  // file currently being processed by the pipeline
 }
 
 // New creates a new channel instance with the given manager and configuration.
@@ -174,6 +181,21 @@ func (ch *Channel) Error(format string, a ...any) {
 	log.Printf("ERROR [%s] %s", ch.Config.Username, fmt.Sprintf(format, a...))
 }
 
+// SetUploadProgress updates live upload status visible in the UI.
+// Safe for concurrent calls from pipeline worker goroutines.
+func (ch *Channel) SetUploadProgress(filename, status string, progress float64) {
+	ch.uploadStatusMu.Lock()
+	ch.UploadFilename = filename
+	ch.UploadStatus = status
+	ch.UploadProgress = progress
+	ch.uploadStatusMu.Unlock()
+	// Trigger a UI update so progress is reflected immediately.
+	select {
+	case ch.UpdateCh <- true:
+	default:
+	}
+}
+
 // ExportInfo exports the channel information as a ChannelInfo struct.
 func (ch *Channel) ExportInfo() *entity.ChannelInfo {
 	return ch.exportInfo(true)
@@ -220,6 +242,12 @@ func (ch *Channel) exportInfo(includeLogs bool) *entity.ChannelInfo {
 		ch.logsMu.Unlock()
 	}
 
+	ch.uploadStatusMu.Lock()
+	uploadStatus := ch.UploadStatus
+	uploadProgress := ch.UploadProgress
+	uploadFilename := ch.UploadFilename
+	ch.uploadStatusMu.Unlock()
+
 	siteName := ch.Config.Site
 	if siteName == "" {
 		siteName = "chaturbate"
@@ -246,8 +274,11 @@ func (ch *Channel) exportInfo(includeLogs bool) *entity.ChannelInfo {
 		Duration:      internal.FormatDuration(duration),
 		Filesize:      internal.FormatFilesize(filesize),
 		Filename:      filename,
-		Logs:          logsCopy,
-		GlobalConfig:  server.Config,
+		Logs:           logsCopy,
+		GlobalConfig:   server.Config,
+		UploadStatus:   uploadStatus,
+		UploadProgress: uploadProgress,
+		UploadFilename: uploadFilename,
 	}
 }
 

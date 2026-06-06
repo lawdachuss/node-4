@@ -163,9 +163,17 @@ func (u *GoFileUploader) uploadFile(server, filePath string) (string, error) {
 			return
 		}
 
+		// Wrap file with ProgressReader for live upload tracking
+		fi, _ := file.Stat()
+		var fileSize int64
+		if fi != nil {
+			fileSize = fi.Size()
+		}
+		progressFile := NewProgressReader(file, fileSize, "GoFile")
+
 		// Use a larger buffer for faster copying (1MB chunks)
 		buf := make([]byte, 1024*1024)
-		if _, err := io.CopyBuffer(part, file, buf); err != nil {
+		if _, err := io.CopyBuffer(part, progressFile, buf); err != nil {
 			errChan <- fmt.Errorf("copy file: %w", err)
 			writer.Close()
 			return

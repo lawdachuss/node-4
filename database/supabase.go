@@ -645,25 +645,7 @@ func (c *Client) DeleteJournalByHash(fileHash string) error {
 // PIPELINE STATES
 // ============================================================================
 //
-// SQL migration (run once in Supabase SQL Editor):
-//
-//   CREATE TABLE pipeline_states (
-//       file_hash       TEXT PRIMARY KEY,
-//       file_path       TEXT NOT NULL,
-//       filename        TEXT NOT NULL,
-//       username        TEXT NOT NULL DEFAULT '',
-//       file_size       BIGINT DEFAULT 0,
-//       current_stage   TEXT NOT NULL DEFAULT 'thumbnail',
-//       failed          BOOLEAN DEFAULT FALSE,
-//       last_error      TEXT DEFAULT '',
-//       thumb_url       TEXT DEFAULT '',
-//       sprite_url      TEXT DEFAULT '',
-//       preview_url     TEXT DEFAULT '',
-//       embed_url       TEXT DEFAULT '',
-//       links           TEXT DEFAULT '{}',
-//       created_at      TIMESTAMPTZ DEFAULT NOW(),
-//       updated_at      TIMESTAMPTZ DEFAULT NOW()
-//   );
+// Schema defined in migrate.sql (CREATE TABLE pipeline_states).
 
 type PipelineState struct {
         FileHash     string `json:"file_hash"`

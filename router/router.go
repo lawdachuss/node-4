@@ -2,6 +2,7 @@ package router
 
 import (
         "embed"
+        "fmt"
         "html/template"
         "log"
         "path/filepath"
@@ -100,7 +101,9 @@ func SetupViews(r *gin.Engine) {
 
 // LoadHTMLFromEmbedFS loads specific HTML templates from an embedded filesystem and registers them with Gin.
 func LoadHTMLFromEmbedFS(r *gin.Engine, embeddedFS embed.FS, files ...string) error {
-        templ := template.New("")
+        templ := template.New("").Funcs(template.FuncMap{
+                "printf": fmt.Sprintf,
+        })
         for _, file := range files {
                 content, err := embeddedFS.ReadFile(file)
                 if err != nil {

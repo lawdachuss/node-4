@@ -85,6 +85,25 @@
     </div>
   </div>
 
+  {{ if .UploadStatus }}
+  <div class="mt-3 mb-1 p-3 rounded-xl" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.15)">
+    <div class="flex items-center gap-2 mb-1">
+      <svg class="w-3.5 h-3.5 text-blue-400 shrink-0 animate-pulse" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+      </svg>
+      <span class="text-[11px] font-semibold text-blue-400 uppercase tracking-wider">Uploading</span>
+    </div>
+    <div class="text-[11px] text-zinc-400 font-mono truncate">{{ .UploadFilename }}</div>
+    <div class="text-[10px] text-zinc-500 mt-0.5">{{ .UploadStatus }}</div>
+    {{ if gt .UploadProgress 0.0 }}
+    <div class="mt-2 w-full h-1.5 rounded-full" style="background:rgba(255,255,255,0.06)">
+      <div class="h-1.5 rounded-full transition-all duration-500" style="width:{{ printf "%.0f" .UploadProgress }}%;background:linear-gradient(90deg,#3b82f6,#8b5cf6)"></div>
+    </div>
+    <div class="text-[10px] text-zinc-600 mt-1 text-right">{{ printf "%.0f" .UploadProgress }}%</div>
+    {{ end }}
+  </div>
+  {{ end }}
+
   <div class="mt-4 mb-4 info-divider" style="height:1px"></div>
 
   <!-- Info rows -->

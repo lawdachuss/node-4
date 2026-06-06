@@ -139,7 +139,7 @@ func (u *VoeSXUploader) uploadFile(filePath string) (string, error) {
 
 	body, contentLen, contentType, file, err := multipartStream(
 		map[string]string{"key": u.apiKey},
-		"file", filePath,
+		"file", filePath, "VOE.sx",
 	)
 	if err != nil {
 		return "", fmt.Errorf("multipart stream: %w", err)

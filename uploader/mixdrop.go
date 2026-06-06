@@ -65,7 +65,7 @@ func (u *MixdropUploader) Upload(filePath string) (string, error) {
                 "email": u.email,
                 "key":   u.token,
         }
-        body, contentLen, contentType, closer, err := multipartStream(fields, "file", filePath)
+	body, contentLen, contentType, closer, err := multipartStream(fields, "file", filePath, "Mixdrop")
         if err != nil {
                 return "", fmt.Errorf("build multipart: %w", err)
         }

@@ -201,6 +201,25 @@ func (p *Pipeline) stageUploadVideos(ch *Channel) error {
 
 	var results []uploader.UploadResult
 	var success []uploader.UploadResult
+
+	// Set up global progress callback for live UI tracking.
+	// The callback is called from each uploader's goroutine as bytes are sent.
+	uploader.SetProgressCallback(func(host string, current, total int64) {
+		hostCount := len(success)
+		uploadedHosts := make(map[string]bool)
+		for _, r := range success {
+			uploadedHosts[r.Host] = true
+		}
+		// If current > 0 we're actively uploading to a host
+		var pct float64
+		if total > 0 {
+			pct = float64(current) / float64(total) * 100
+		}
+		status := fmt.Sprintf("uploading to %s (%.0f%%) — %d/%d hosts done", host, pct, hostCount, len(allHosts))
+		ch.SetUploadProgress(filename, status, pct/float64(len(allHosts)))
+	})
+	defer uploader.ClearProgressCallback()
+
 	for attempt := 1; attempt <= maxChannelUploadAttempts; attempt++ {
 		if attempt > 1 && len(hostsToTry) == 0 {
 			break
@@ -208,6 +227,10 @@ func (p *Pipeline) stageUploadVideos(ch *Channel) error {
 		var attemptResults []uploader.UploadResult
 		attemptResults = upl.UploadSelected(filePath, hostsToTry)
 		results = append(results, attemptResults...)
+
+		success = uploader.GetSuccessfulUploads(results)
+		ch.SetUploadProgress(filename, fmt.Sprintf("uploaded to %d/%d hosts", len(success), len(allHosts)),
+			float64(len(success))/float64(len(allHosts))*100)
 
 		if p.FileHash != "" {
 			stat, _ := os.Stat(filePath)
@@ -228,7 +251,6 @@ func (p *Pipeline) stageUploadVideos(ch *Channel) error {
 			}
 		}
 
-		success = uploader.GetSuccessfulUploads(results)
 		if len(success) >= len(allHosts) {
 			break
 		}
@@ -442,6 +464,7 @@ func (pq *PipelineQueue) processLoop() {
 func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	ch := pq.ch
 	filename := p.Filename
+	ch.SetUploadProgress(filename, "queued for processing", 0)
 	ch.Info("pipeline: processing %s (starting at stage %s)", filename, p.CurrentStage)
 
 	defer func() {
@@ -479,6 +502,7 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	// ── Stage: Thumbnail + Video Upload (parallel) ───────────────────────
 	if p.CurrentStage == StageThumbnailUpload {
 		ch.Info("pipeline: stage thumbnail_upload for %s", filename)
+		ch.SetUploadProgress(filename, "generating thumbnails and uploading to hosts", 5)
 
 		var wg sync.WaitGroup
 		var thumbErr error
@@ -522,6 +546,7 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	// ── Stage: Save Metadata ─────────────────────────────────────────────
 	if p.CurrentStage == StageSaveMetadata {
 		ch.Info("pipeline: stage save_metadata for %s", filename)
+		ch.SetUploadProgress(filename, "saving recording metadata", 90)
 		if err := p.stageSaveMetadata(ch); err != nil {
 			ch.Error("pipeline: metadata stage failed for %s: %v", filename, err)
 		}
@@ -531,6 +556,7 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	// ── Stage: Cleanup ───────────────────────────────────────────────────
 	if p.CurrentStage == StageCleanup {
 		ch.Info("pipeline: stage cleanup for %s", filename)
+		ch.SetUploadProgress(filename, "cleaning up local files", 95)
 		if err := p.stageCleanup(ch); err != nil {
 			ch.Error("pipeline: cleanup stage failed for %s: %v", filename, err)
 		}
@@ -542,6 +568,7 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	} else if !p.Failed {
 		ch.Info("pipeline: %s paused at stage %s (will retry)", filename, p.CurrentStage)
 	}
+	ch.SetUploadProgress("", "", 0)
 }
 
 // EnqueueFile creates a pipeline for a finalized video file and adds it to the queue.

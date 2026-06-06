@@ -64,7 +64,9 @@ func (u *PixeldrainUploader) Upload(filePath string) (string, error) {
 	name := filepath.Base(filePath)
 	url := fmt.Sprintf("https://pixeldrain.com/api/file/%s", name)
 
-	req, err := http.NewRequest("PUT", url, file)
+	// Wrap file with ProgressReader for live upload tracking
+	progressFile := NewProgressReader(file, fi.Size(), "PixelDrain")
+	req, err := http.NewRequest("PUT", url, progressFile)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}

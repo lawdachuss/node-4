@@ -69,8 +69,11 @@ type ChannelInfo struct {
 	MaxDuration   string
 	MaxFilesize   string
 	CreatedAt     int64
-	Logs          []string
-	GlobalConfig  *Config // for nested template to access $.Config
+	Logs           []string
+	GlobalConfig   *Config // for nested template to access $.Config
+	UploadStatus   string  // human-readable upload status (empty = idle)
+	UploadProgress float64 // 0–100 upload progress estimate
+	UploadFilename string  // file currently being uploaded
 }
 
 // DiskInfo holds disk usage information for the UI.
