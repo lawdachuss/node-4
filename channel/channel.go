@@ -78,9 +78,15 @@ type Channel struct {
 	// Upload progress tracking — updated by the pipeline worker goroutine.
 	// Thread-safe via uploadStatusMu; visible in the UI via ExportInfo().
 	uploadStatusMu   sync.Mutex
-	UploadStatus     string  // human-readable status: "", "generating thumbnails…", "uploading (2/5 hosts)…"
-	UploadProgress   float64 // 0–100, best-effort estimate
-	UploadFilename   string  // file currently being processed by the pipeline
+	UploadStatus     string            // human-readable status: "", "generating thumbnails…", "uploading (2/5 hosts)…"
+	UploadProgress   float64           // 0–100, best-effort estimate
+	UploadFilename   string            // file currently being processed by the pipeline
+	UploadHostCount  int               // how many hosts have completed
+	UploadHostTotal  int               // total hosts to upload to
+	UploadBytesCur   int64             // bytes uploaded so far
+	UploadBytesTotal int64             // total file size
+	UploadSpeed      string            // formatted aggregate speed
+	UploadHosts      []entity.HostEntry // per-host progress
 }
 
 // New creates a new channel instance with the given manager and configuration.
@@ -183,16 +189,48 @@ func (ch *Channel) Error(format string, a ...any) {
 
 // SetUploadProgress updates live upload status visible in the UI.
 // Safe for concurrent calls from pipeline worker goroutines.
-func (ch *Channel) SetUploadProgress(filename, status string, progress float64) {
+func (ch *Channel) SetUploadProgress(filename, status string, progress float64, hostCount, hostTotal int, bytesCur, bytesTotal int64, speed string, hosts []entity.HostEntry) {
 	ch.uploadStatusMu.Lock()
 	ch.UploadFilename = filename
 	ch.UploadStatus = status
 	ch.UploadProgress = progress
+	ch.UploadHostCount = hostCount
+	ch.UploadHostTotal = hostTotal
+	ch.UploadBytesCur = bytesCur
+	ch.UploadBytesTotal = bytesTotal
+	ch.UploadSpeed = speed
+	ch.UploadHosts = hosts
 	ch.uploadStatusMu.Unlock()
 	// Trigger a UI update so progress is reflected immediately.
 	select {
 	case ch.UpdateCh <- true:
 	default:
+	}
+	// Broadcast aggregated upload state for the session timer UI.
+	if server.Manager != nil {
+		server.Manager.PublishUploadState()
+	}
+}
+
+// UploadEntry returns the current upload progress entry for this channel.
+func (ch *Channel) UploadEntry() entity.UploadEntry {
+	ch.uploadStatusMu.Lock()
+	defer ch.uploadStatusMu.Unlock()
+	hosts := ch.UploadHosts
+	if hosts == nil {
+		hosts = []entity.HostEntry{}
+	}
+	return entity.UploadEntry{
+		Channel:      ch.Config.Username,
+		Filename:     ch.UploadFilename,
+		Status:       ch.UploadStatus,
+		Progress:     ch.UploadProgress,
+		HostCount:    ch.UploadHostCount,
+		HostTotal:    ch.UploadHostTotal,
+		BytesCurrent: ch.UploadBytesCur,
+		BytesTotal:   ch.UploadBytesTotal,
+		Speed:        ch.UploadSpeed,
+		Hosts:        hosts,
 	}
 }
 
@@ -221,6 +259,7 @@ func (ch *Channel) exportInfo(includeLogs bool) *entity.ChannelInfo {
 	currentFilename := ch.CurrentFilename
 	hasSeparateAudio := ch.HasSeparateAudio
 	hasFile := ch.File != nil
+	liveThumbURL := ch.LiveThumbURL
 	var fileName string
 	if hasFile {
 		fileName = ch.File.Name()
@@ -266,7 +305,7 @@ func (ch *Channel) exportInfo(includeLogs bool) *entity.ChannelInfo {
 		Username:      ch.Config.Username,
 		Site:          siteName,
 		SiteDomain:    siteDomain,
-		LiveThumbURL:  ch.LiveThumbURL,
+		LiveThumbURL:  liveThumbURL,
 		MaxDuration:   internal.FormatDuration(float64(ch.Config.MaxDuration * 60)),
 		MaxFilesize:   internal.FormatFilesize(ch.Config.MaxFilesize * 1024 * 1024),
 		StreamedAt:    streamedAt,

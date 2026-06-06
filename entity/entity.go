@@ -76,6 +76,52 @@ type ChannelInfo struct {
 	UploadFilename string  // file currently being uploaded
 }
 
+// HostEntry holds live upload progress for a single host.
+type HostEntry struct {
+	Host         string  `json:"host"`          // host name (GoFile, VOE.sx, etc.)
+	Status       string  `json:"status"`        // "uploading", "done", "failed"
+	Progress     float64 `json:"progress"`      // 0–100
+	BytesCurrent int64   `json:"bytes_current"` // bytes uploaded so far
+	BytesTotal   int64   `json:"bytes_total"`   // total file size
+	Speed        string  `json:"speed"`         // formatted speed, e.g. "2.5 MB/s"
+}
+
+// UploadEntry holds upload progress for a single channel's active upload.
+type UploadEntry struct {
+	Channel      string      `json:"channel"`       // which channel is uploading
+	Filename     string      `json:"filename"`      // file being uploaded
+	Status       string      `json:"status"`        // human-readable status
+	Progress     float64     `json:"progress"`      // 0–100
+	HostCount    int         `json:"host_count"`     // how many hosts completed
+	HostTotal    int         `json:"host_total"`     // total hosts to upload to
+	BytesCurrent int64       `json:"bytes_current"` // total bytes uploaded so far across all hosts
+	BytesTotal   int64       `json:"bytes_total"`   // total file size
+	Speed        string      `json:"speed"`         // formatted aggregate speed, e.g. "3.2 MB/s"
+	Hosts        []HostEntry `json:"hosts"`         // per-host progress
+}
+
+// UploadState holds live upload progress data for the global session timer UI.
+type UploadState struct {
+	Active   bool          `json:"active"`   // true if any channel is uploading
+	Channels []UploadEntry `json:"channels"` // all active uploads
+}
+
+// PendingEntry describes a file queued for processing but not yet uploading.
+type PendingEntry struct {
+	Channel  string `json:"channel"`  // username
+	Filename string `json:"filename"` // file name
+	Stage    string `json:"stage"`    // human-readable current stage
+	Failed   bool   `json:"failed"`
+	Error    string `json:"error,omitempty"`
+}
+
+// UploadsResponse is the full JSON body returned by GET /api/uploads.
+type UploadsResponse struct {
+	Active  []UploadEntry  `json:"active"`  // currently uploading per-channel
+	Pending []PendingEntry `json:"pending"` // queued and waiting for processing
+	History []PendingEntry `json:"history"` // recently completed or failed pipelines
+}
+
 // DiskInfo holds disk usage information for the UI.
 type DiskInfo struct {
 	Total   string // formatted, e.g. "256.00 GB"

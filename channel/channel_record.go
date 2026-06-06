@@ -121,7 +121,9 @@ func (ch *Channel) RecordStream(ctx context.Context, siteImpl site.Site, req *in
 	ch.Tags = info.Tags
 	ch.Viewers = info.NumUsers
 	ch.Gender = info.Gender
+	ch.stateMu.Lock()
 	ch.LiveThumbURL = info.LiveThumbURL
+	ch.stateMu.Unlock()
 
 	if len(ch.Tags) == 0 && ch.RoomTitle != "" {
 		ch.Tags = extractHashtags(ch.RoomTitle)
@@ -318,6 +320,29 @@ func (ch *Channel) watchWithGraceSC(ctx context.Context, client *internal.Req, p
 		siteImpl = stripchat.NewStripchatSite()
 	}
 
+	// Periodically refresh LiveThumbURL during Stripchat recording.
+	// Stripchat's API returns a signed preview URL that can expire; refreshing
+	// it ensures the thumbnail in the UI stays current rather than going stale.
+	refreshCtx, refreshCancel := context.WithCancel(ctx)
+	defer refreshCancel()
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-refreshCtx.Done():
+				return
+			case <-ticker.C:
+				info, err := siteImpl.FetchStream(refreshCtx, client, ch.Config.Username)
+				if err == nil && info.LiveThumbURL != "" {
+					ch.stateMu.Lock()
+					ch.LiveThumbURL = info.LiveThumbURL
+					ch.stateMu.Unlock()
+				}
+			}
+		}
+	}()
+
 	origErr := ch.watchLoopSC(ctx, client, p)
 	if origErr == nil {
 		return nil
@@ -340,6 +365,12 @@ func (ch *Channel) watchWithGraceSC(ctx context.Context, client *internal.Req, p
 		if apiErr != nil {
 			ch.Info("recording: API still unavailable (%s); %s remaining", apiErr, time.Until(deadline).Round(time.Second))
 			continue
+		}
+
+		if info.LiveThumbURL != "" {
+			ch.stateMu.Lock()
+			ch.LiveThumbURL = info.LiveThumbURL
+			ch.stateMu.Unlock()
 		}
 
 		newPlaylist, apiErr := stripchat.FetchPlaylist(ctx, client, info.HLSSource, p.PDKey, ch.Config.Resolution, ch.Config.Framerate)
@@ -371,9 +402,29 @@ func (ch *Channel) watchWithGraceSC(ctx context.Context, client *internal.Req, p
 }
 
 func (ch *Channel) watchLoopSC(ctx context.Context, client *internal.Req, p *stripchat.Playlist) error {
+	return ch.watchLoopSCWithRetry(ctx, client, p, 0)
+}
+
+func (ch *Channel) watchLoopSCWithRetry(ctx context.Context, client *internal.Req, p *stripchat.Playlist, retryCount int) error {
+	const maxRetries = 3
+
 	err := p.WatchAVSegments(ctx, ch.HandleSegment, ch.HandleInitSegment, ch.HandleAudioSegment, ch.HandleAudioInitSegment, ch.OnPollComplete)
 	if err != nil && errors.Is(err, internal.ErrStreamStalled) {
-		ch.Info("recording: CDN session expired — fetching fresh playlist URL")
+		if retryCount >= maxRetries {
+			ch.Info("recording: max CDN refreshes reached (%d) — channel likely offline", maxRetries)
+			return fmt.Errorf("max CDN refreshes exceeded: %w", err)
+		}
+
+		ch.Info("recording: CDN session expired — fetching fresh playlist URL (attempt %d/%d)", retryCount+1, maxRetries)
+
+		// Check if the channel is actually still online before trying to reconnect.
+		siteImpl := stripchat.NewStripchatSite()
+		_, fetchErr := siteImpl.FetchStream(ctx, client, ch.Config.Username)
+		if fetchErr != nil {
+			ch.Info("recording: channel appears offline after CDN expiry (%s)", fetchErr)
+			return fetchErr
+		}
+
 		newPlaylist, apiErr := stripchat.FetchPlaylist(ctx, client, p.MasterURL, p.PDKey, ch.Config.Resolution, ch.Config.Framerate)
 		if apiErr != nil {
 			return apiErr
@@ -384,7 +435,7 @@ func (ch *Channel) watchLoopSC(ctx context.Context, client *internal.Req, p *str
 		ch.RoomStatus = site.StatusPublic
 		ch.stateMu.Unlock()
 		ch.UpdateOnlineStatus(true)
-		return ch.watchLoopSC(ctx, client, newPlaylist)
+		return ch.watchLoopSCWithRetry(ctx, client, newPlaylist, retryCount+1)
 	}
 	return err
 }

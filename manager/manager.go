@@ -33,7 +33,7 @@ type renderCacheEntry struct {
 // field displayed in the channel_info template changes. This is used
 // to skip redundant template renders + SSE pushes.
 func channelInfoFingerprint(info *entity.ChannelInfo) string {
-	return fmt.Sprintf("%t|%t|%t|%t|%s|%s|%s|%s|%s",
+	return fmt.Sprintf("%t|%t|%t|%t|%s|%s|%s|%s|%s|%s|%.0f|%s",
 		info.IsOnline,
 		info.IsConnecting,
 		info.IsPaused,
@@ -43,6 +43,9 @@ func channelInfoFingerprint(info *entity.ChannelInfo) string {
 		info.Filesize,
 		info.Filename,
 		info.StreamedAt,
+		info.UploadStatus,
+		info.UploadProgress,
+		info.UploadFilename,
 	)
 }
 
@@ -746,6 +749,36 @@ func (m *Manager) Publish(evt entity.Event, info *entity.ChannelInfo) {
 	}
 }
 
+// PublishUploadState aggregates upload progress from all channels and
+// broadcasts it as an SSE "upload" event for the session timer UI.
+func (m *Manager) PublishUploadState() {
+	state := entity.UploadState{Active: false}
+	var entries []entity.UploadEntry
+	m.Channels.Range(func(_, value any) bool {
+		ch := value.(*channel.Channel)
+		e := ch.UploadEntry()
+		if e.Filename == "" && e.Status == "" {
+			return true
+		}
+		state.Active = true
+		entries = append(entries, e)
+		return true
+	})
+	if len(entries) == 0 {
+		entries = nil
+	}
+	state.Channels = entries
+
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return
+	}
+	m.SSE.Publish("updates", &sse.Event{
+		Event: []byte("upload"),
+		Data:  payload,
+	})
+}
+
 func (m *Manager) PublishLog(username, line string) {
 	if strings.TrimSpace(line) == "" {
 		return
@@ -764,6 +797,33 @@ func (m *Manager) PublishLog(username, line string) {
 		Event: []byte(username + "-log"),
 		Data:  []byte(line),
 	})
+}
+
+// UploadEntries returns the full uploads response (active + pending + history) for the API.
+func (m *Manager) UploadEntries() *entity.UploadsResponse {
+	resp := &entity.UploadsResponse{}
+	m.Channels.Range(func(_, value any) bool {
+		ch := value.(*channel.Channel)
+		e := ch.UploadEntry()
+		if e.Filename != "" || e.Status != "" {
+			resp.Active = append(resp.Active, e)
+		}
+		queued := ch.PipelineQueue.QueuedEntries()
+		resp.Pending = append(resp.Pending, queued...)
+		hist := ch.PipelineQueue.HistoryEntries()
+		resp.History = append(resp.History, hist...)
+		return true
+	})
+	if resp.Active == nil {
+		resp.Active = []entity.UploadEntry{}
+	}
+	if resp.Pending == nil {
+		resp.Pending = []entity.PendingEntry{}
+	}
+	if resp.History == nil {
+		resp.History = []entity.PendingEntry{}
+	}
+	return resp
 }
 
 // Subscriber handles SSE subscriptions for the specified channel.

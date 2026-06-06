@@ -779,6 +779,12 @@ type orphanEntry struct {
 // ListOrphans returns a JSON list of orphaned video files found in the
 // videos/ and OutputDir directories.  Orphans are files that exist on disk
 // but have no Supabase recording entry.
+// UploadQueue returns the current upload queue state (active + pending) as JSON.
+func UploadQueue(c *gin.Context) {
+	resp := server.Manager.UploadEntries()
+	c.JSON(http.StatusOK, resp)
+}
+
 // TriggerSessionStop manually stops the current recording session early
 // and starts the mux/upload/processing phase.
 func TriggerSessionStop(c *gin.Context) {

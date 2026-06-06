@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/teacat/chaturbate-dvr/database"
+	"github.com/teacat/chaturbate-dvr/entity"
 	"github.com/teacat/chaturbate-dvr/internal"
 	"github.com/teacat/chaturbate-dvr/server"
 	"github.com/teacat/chaturbate-dvr/uploader"
@@ -204,19 +205,92 @@ func (p *Pipeline) stageUploadVideos(ch *Channel) error {
 
 	// Set up global progress callback for live UI tracking.
 	// The callback is called from each uploader's goroutine as bytes are sent.
+	hostProgress := make(map[string]struct {
+		bytes    int64
+		total    int64
+		lastTime time.Time
+	})
+	var hostMu sync.Mutex
 	uploader.SetProgressCallback(func(host string, current, total int64) {
+		hostMu.Lock()
+		hp, ok := hostProgress[host]
+		if !ok {
+			hp = struct {
+				bytes    int64
+				total    int64
+				lastTime time.Time
+			}{total: total}
+		}
+		now := time.Now()
+		var speed float64
+		if !hp.lastTime.IsZero() && current > hp.bytes {
+			dt := now.Sub(hp.lastTime).Seconds()
+			if dt > 0 {
+				speed = float64(current-hp.bytes) / dt
+			}
+		}
+		hp.bytes = current
+		hp.lastTime = now
+		hostProgress[host] = hp
+		hostMu.Unlock()
+
 		hostCount := len(success)
 		uploadedHosts := make(map[string]bool)
 		for _, r := range success {
 			uploadedHosts[r.Host] = true
 		}
-		// If current > 0 we're actively uploading to a host
+
+		// Build per-host entries
+		hostMu.Lock()
+		hosts := make([]entity.HostEntry, 0, len(allHosts))
+		var totalCur, totalBytes int64
+		for _, h := range allHosts {
+			state, exists := hostProgress[h]
+			entry := entity.HostEntry{Host: h}
+			if uploadedHosts[h] {
+				entry.Status = "done"
+				entry.Progress = 100
+				entry.BytesCurrent = state.total
+				entry.BytesTotal = state.total
+			} else if h == host {
+				var pct float64
+				if total > 0 {
+					pct = float64(current) / float64(total) * 100
+				}
+				entry.Status = "uploading"
+				entry.Progress = pct
+				entry.BytesCurrent = current
+				entry.BytesTotal = total
+				if speed > 0 {
+					entry.Speed = formatSpeed(speed)
+				}
+			} else if !exists || state.bytes == 0 {
+				entry.Status = "pending"
+				if exists {
+					entry.BytesTotal = state.total
+				}
+			} else {
+				entry.Status = "uploading"
+				entry.Progress = 100
+				if state.total > 0 {
+					entry.Progress = float64(state.bytes) / float64(state.total) * 100
+				}
+				entry.BytesCurrent = state.bytes
+				entry.BytesTotal = state.total
+			}
+			totalCur += entry.BytesCurrent
+			totalBytes += entry.BytesTotal
+			hosts = append(hosts, entry)
+		}
+		aggSpeed := formatSpeed(speed)
+		hostMu.Unlock()
+
 		var pct float64
 		if total > 0 {
 			pct = float64(current) / float64(total) * 100
 		}
 		status := fmt.Sprintf("uploading to %s (%.0f%%) — %d/%d hosts done", host, pct, hostCount, len(allHosts))
-		ch.SetUploadProgress(filename, status, pct/float64(len(allHosts)))
+		ch.SetUploadProgress(filename, status, pct/float64(len(allHosts)), hostCount, len(allHosts), totalCur, totalBytes, aggSpeed, hosts)
 	})
 	defer uploader.ClearProgressCallback()
 
@@ -230,7 +304,8 @@ func (p *Pipeline) stageUploadVideos(ch *Channel) error {
 
 		success = uploader.GetSuccessfulUploads(results)
 		ch.SetUploadProgress(filename, fmt.Sprintf("uploaded to %d/%d hosts", len(success), len(allHosts)),
-			float64(len(success))/float64(len(allHosts))*100)
+			float64(len(success))/float64(len(allHosts))*100, len(success), len(allHosts),
+			0, 0, "", nil)
 
 		if p.FileHash != "" {
 			stat, _ := os.Stat(filePath)
@@ -386,7 +461,8 @@ type PipelineQueue struct {
 	stopped   bool
 	started   bool // tracks whether the worker goroutine has been launched
 
-	ch        *Channel
+	ch      *Channel
+	history []entity.PendingEntry // last 50 completed/failed pipelines
 }
 
 // NewPipelineQueue creates a new pipeline queue for a channel.
@@ -457,6 +533,43 @@ func (pq *PipelineQueue) processLoop() {
 	}
 }
 
+// QueuedEntries returns info about all pending pipelines in the queue.
+func (pq *PipelineQueue) QueuedEntries() []entity.PendingEntry {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+	entries := make([]entity.PendingEntry, 0, len(pq.pipelines))
+	for _, p := range pq.pipelines {
+		entries = append(entries, entity.PendingEntry{
+			Channel:  p.Username,
+			Filename: p.Filename,
+			Stage:    p.CurrentStage.String(),
+			Failed:   p.Failed,
+			Error:    p.LastError,
+		})
+	}
+	return entries
+}
+
+// HistoryEntries returns the recent pipeline history.
+func (pq *PipelineQueue) HistoryEntries() []entity.PendingEntry {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+	out := make([]entity.PendingEntry, len(pq.history))
+	copy(out, pq.history)
+	return out
+}
+
+// pushHistory appends a completed/failed pipeline to the ring buffer.
+func (pq *PipelineQueue) pushHistory(e entity.PendingEntry) {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+	const maxHistory = 50
+	pq.history = append(pq.history, e)
+	if len(pq.history) > maxHistory {
+		pq.history = pq.history[len(pq.history)-maxHistory:]
+	}
+}
+
 // processPipeline runs a single pipeline through all stages.
 // Thumbnail generation and video upload run in parallel goroutines to
 // minimize wall-clock time per file.  Both must finish before metadata
@@ -464,7 +577,7 @@ func (pq *PipelineQueue) processLoop() {
 func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	ch := pq.ch
 	filename := p.Filename
-	ch.SetUploadProgress(filename, "queued for processing", 0)
+	ch.SetUploadProgress(filename, "queued for processing", 0, 0, 0, 0, 0, "", nil)
 	ch.Info("pipeline: processing %s (starting at stage %s)", filename, p.CurrentStage)
 
 	defer func() {
@@ -474,6 +587,17 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 			p.LastError = fmt.Sprintf("panic: %v", r)
 		}
 		ch.UploadWg.Done()
+		// Record history
+		stageStr := p.CurrentStage.String()
+		if p.Failed || p.CurrentStage == StageDone {
+			pq.pushHistory(entity.PendingEntry{
+				Channel:  ch.Config.Username,
+				Filename: filename,
+				Stage:    stageStr,
+				Failed:   p.Failed,
+				Error:    p.LastError,
+			})
+		}
 		if p.CurrentStage == StageDone || p.Failed {
 			if p.CurrentStage == StageDone {
 				if delErr := server.DeletePipelineState(p.FileHash); delErr != nil {
@@ -502,7 +626,7 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	// ── Stage: Thumbnail + Video Upload (parallel) ───────────────────────
 	if p.CurrentStage == StageThumbnailUpload {
 		ch.Info("pipeline: stage thumbnail_upload for %s", filename)
-		ch.SetUploadProgress(filename, "generating thumbnails and uploading to hosts", 5)
+		ch.SetUploadProgress(filename, "generating thumbnails and uploading to hosts", 5, 0, 0, 0, 0, "", nil)
 
 		var wg sync.WaitGroup
 		var thumbErr error
@@ -546,7 +670,7 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	// ── Stage: Save Metadata ─────────────────────────────────────────────
 	if p.CurrentStage == StageSaveMetadata {
 		ch.Info("pipeline: stage save_metadata for %s", filename)
-		ch.SetUploadProgress(filename, "saving recording metadata", 90)
+		ch.SetUploadProgress(filename, "saving recording metadata", 90, len(p.Links), len(p.Links), 0, 0, "", nil)
 		if err := p.stageSaveMetadata(ch); err != nil {
 			ch.Error("pipeline: metadata stage failed for %s: %v", filename, err)
 		}
@@ -556,7 +680,7 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	// ── Stage: Cleanup ───────────────────────────────────────────────────
 	if p.CurrentStage == StageCleanup {
 		ch.Info("pipeline: stage cleanup for %s", filename)
-		ch.SetUploadProgress(filename, "cleaning up local files", 95)
+		ch.SetUploadProgress(filename, "cleaning up local files", 95, len(p.Links), len(p.Links), 0, 0, "", nil)
 		if err := p.stageCleanup(ch); err != nil {
 			ch.Error("pipeline: cleanup stage failed for %s: %v", filename, err)
 		}
@@ -568,7 +692,7 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 	} else if !p.Failed {
 		ch.Info("pipeline: %s paused at stage %s (will retry)", filename, p.CurrentStage)
 	}
-	ch.SetUploadProgress("", "", 0)
+	ch.SetUploadProgress("", "", 0, 0, 0, 0, 0, "", nil)
 }
 
 // EnqueueFile creates a pipeline for a finalized video file and adds it to the queue.
@@ -625,5 +749,18 @@ func (pq *PipelineQueue) ResumePending() {
 		pq.pipelines = append(pq.pipelines, p)
 		pq.mu.Unlock()
 		pq.cond.Signal()
+	}
+}
+
+func formatSpeed(bytesPerSec float64) string {
+	switch {
+	case bytesPerSec >= 1_000_000_000:
+		return fmt.Sprintf("%.1f GB/s", bytesPerSec/1_000_000_000)
+	case bytesPerSec >= 1_000_000:
+		return fmt.Sprintf("%.1f MB/s", bytesPerSec/1_000_000)
+	case bytesPerSec >= 1_000:
+		return fmt.Sprintf("%.0f KB/s", bytesPerSec/1_000)
+	default:
+		return fmt.Sprintf("%.0f B/s", bytesPerSec)
 	}
 }

@@ -94,6 +94,9 @@ func SetupViews(r *gin.Engine) {
 	// Thumbnail proxy API
 	r.GET("/api/thumb/:username", ServeLiveThumb)
 
+	// Upload queue API
+	r.GET("/api/uploads", UploadQueue)
+
 	// Session control API
 	r.POST("/api/session/stop", TriggerSessionStop)
 

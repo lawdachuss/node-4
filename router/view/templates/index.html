@@ -280,6 +280,15 @@
             background: var(--bg-input) !important;
             border-color: var(--border-color) !important;
         }
+
+        /* Upload badge pulse */
+        @keyframes upload-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .upload-dot-pulse {
+            animation: upload-pulse 1.2s ease-in-out infinite;
+        }
     </style>
 </head>
 
@@ -396,31 +405,75 @@
     <!-- ═══════════════════ MAIN CONTENT ═══════════════════ -->
     <main id="main-content" class="flex-1 flex flex-col overflow-hidden relative" style="background:var(--bg-surface)" {{ if .Channels }}sse-connect="/updates?stream=updates"{{ end }}>
 
-        <!-- Floating Session Clock -->
+        <!-- Session Timer Badge (floating clock) -->
         <div id="session-floating" style="position:absolute;bottom:12px;right:16px;z-index:50">
             <button id="session-badge" onclick="toggleSessionCard()"
-                style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:10px;background:rgba(0,0,0,0.75);border:1px solid rgba(255,255,255,0.1);color:#e4e4e7;cursor:pointer;font-family:ui-monospace,monospace;font-size:12px">
+                style="display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;background:rgba(0,0,0,0.75);border:1px solid rgba(255,255,255,0.1);color:#e4e4e7;cursor:pointer;font-family:ui-monospace,monospace;font-size:12px">
                 <svg style="width:14px;height:14px;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
                 </svg>
                 <span id="session-badge-time" style="font-variant-numeric:tabular-nums">--</span>
+                <span id="session-badge-upload" style="display:none;align-items:center;gap:3px;padding:1px 5px;border-radius:4px;background:rgba(59,130,246,0.15);color:#60a5fa;font-size:9px;font-weight:600">
+                    <span class="upload-dot" style="width:4px;height:4px;border-radius:50%;background:#60a5fa"></span>
+                    <span>UP</span>
+                    <span id="session-badge-upload-count" style="font-size:8px;opacity:0.7">0</span>
+                </span>
             </button>
-            <div id="session-card" class="hidden" style="position:absolute;bottom:100%;right:0;margin-bottom:8px;width:260px;padding:16px;border-radius:12px;background:rgba(24,24,27,0.9);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.1);box-shadow:0 10px 40px rgba(0,0,0,0.3);z-index:60">
+            <div id="session-card" class="hidden" style="position:absolute;bottom:100%;right:0;margin-bottom:8px;width:320px;padding:16px;border-radius:12px;background:rgba(24,24,27,0.9);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.1);box-shadow:0 10px 40px rgba(0,0,0,0.3);z-index:60">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
                     <svg style="width:14px;height:14px;color:#fbbf24;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
                     </svg>
-                    <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:#71717a">Session Timer</span>
+                    <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:#71717a">Session</span>
+                    <span style="margin-left:auto;font-size:9px;color:#52525b" id="session-card-sub">--</span>
                 </div>
                 <div id="session-card-time" style="font-size:24px;font-family:ui-monospace,monospace;font-weight:700;color:#f4f4f5;margin-bottom:12px;font-variant-numeric:tabular-nums">--</div>
-                <div style="height:4px;border-radius:4px;background:rgba(255,255,255,0.05);overflow:hidden;margin-bottom:16px">
+                <div style="height:4px;border-radius:4px;background:rgba(255,255,255,0.05);overflow:hidden;margin-bottom:12px">
                     <div id="session-card-progress" style="height:100%;border-radius:4px;background:linear-gradient(90deg,#d97706,#fbbf24);transition:width 1s;width:0%"></div>
                 </div>
-                <button onclick="confirmStopSession()"
+
+                <button id="session-stop-btn" onclick="confirmStopSession()"
                     style="width:100%;padding:10px 16px;border-radius:10px;background:linear-gradient(135deg,#d97706,#f59e0b);color:white;font-size:13px;font-weight:600;border:none;cursor:pointer;box-shadow:0 4px 12px rgba(217,119,6,0.2)">
                     Stop &amp; Process Now
                 </button>
+                <button onclick="openUploadQueue()"
+                    style="width:100%;margin-top:6px;padding:8px 16px;border-radius:10px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#60a5fa;font-size:12px;font-weight:500;cursor:pointer">
+                    Upload Queue
+                </button>
+                <button onclick="retryOrphans()"
+                    style="width:100%;margin-top:4px;padding:8px 16px;border-radius:10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15);color:#f87171;font-size:12px;font-weight:500;cursor:pointer">
+                    Process Orphans
+                </button>
                 <p style="font-size:10px;color:#52525b;text-align:center;margin-top:8px">All channels stop, uploads begin</p>
+            </div>
+        </div>
+
+        <!-- Upload Queue Modal -->
+        <div id="upload-queue-overlay" onclick="closeUploadQueue()" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:100"></div>
+        <div id="upload-queue-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:110;width:440px;max-width:90vw;max-height:80vh;border-radius:16px;background:rgba(24,24,27,0.96);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.1);box-shadow:0 16px 64px rgba(0,0,0,0.5);overflow:hidden">
+            <div style="display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.06)">
+                <svg style="width:14px;height:14px;color:#60a5fa;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                </svg>
+                <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:#e4e4e7">Upload Queue</span>
+                <span id="upload-queue-close" onclick="closeUploadQueue()" style="margin-left:auto;cursor:pointer;padding:4px;border-radius:6px;color:#52525b;font-size:16px;line-height:1">&times;</span>
+            </div>
+            <div id="upload-queue-body" style="padding:12px 16px;overflow-y:auto;max-height:calc(80vh - 52px)">
+                <!-- populated by renderUploadQueue() -->
+            </div>
+        </div>
+
+        <!-- Upload Bar (always visible at bottom when active) -->
+        <div id="upload-bar" style="display:none;position:absolute;bottom:0;left:0;right:0;z-index:45;background:rgba(15,15,18,0.92);backdrop-filter:blur(12px);border-top:1px solid rgba(59,130,246,0.15);padding:10px 16px;max-height:40vh;overflow-y:auto">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                <svg style="width:12px;height:12px;color:#60a5fa;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                </svg>
+                <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:#60a5fa">Uploads</span>
+                <span id="upload-bar-count" style="font-size:9px;color:#71717a;margin-left:auto">0 active</span>
+            </div>
+            <div id="upload-bar-list" style="display:flex;flex-direction:column;gap:6px">
+                <!-- populated by renderUploadState() -->
             </div>
         </div>
 
@@ -1093,8 +1146,12 @@ function sortChannelList() {
     list.appendChild(frag);
 }
 
+var _lastSidebarRefresh = 0;
 function scheduleSidebarRefresh() {
     if (_sidebarRefreshPending) return;
+    var now = Date.now();
+    if (now - _lastSidebarRefresh < 1000) return; // throttle to 1 Hz
+    _lastSidebarRefresh = now;
     _sidebarRefreshPending = true;
     requestAnimationFrame(function() {
         _sidebarRefreshPending = false;
@@ -1109,6 +1166,17 @@ scheduleSidebarRefresh();
 // ════════════════════════════════════════════════════
 document.addEventListener('htmx:sseMessage', function(e) {
     var eventName = e.detail.type || '';
+
+    // ── Global upload state (broadcast from Manager.PublishUploadState) ──
+    if (eventName === 'upload') {
+        try {
+            var data = JSON.parse(e.detail.data || '{}');
+            window.__uploadState = data;
+            renderUploadState(data);
+        } catch(_) {}
+        return;
+    }
+
     var parts     = eventName.split('-');
     if (parts.length < 2) return;
 
@@ -1253,6 +1321,348 @@ document.querySelectorAll('.log-container').forEach(function(container) {
     updateLogCount(container);
 });
 
+// ── Upload queue modal ──
+var _uploadQueueInterval = null;
+
+function openUploadQueue() {
+    var overlay = document.getElementById('upload-queue-overlay');
+    var modal = document.getElementById('upload-queue-modal');
+    if (!overlay || !modal) return;
+    overlay.style.display = 'block';
+    modal.style.display = 'block';
+    fetchUploadQueue();
+    if (_uploadQueueInterval) clearInterval(_uploadQueueInterval);
+    _uploadQueueInterval = setInterval(fetchUploadQueue, 3000);
+}
+
+function closeUploadQueue() {
+    var overlay = document.getElementById('upload-queue-overlay');
+    var modal = document.getElementById('upload-queue-modal');
+    if (overlay) overlay.style.display = 'none';
+    if (modal) modal.style.display = 'none';
+    if (_uploadQueueInterval) {
+        clearInterval(_uploadQueueInterval);
+        _uploadQueueInterval = null;
+    }
+}
+
+function fetchUploadQueue() {
+    Promise.all([
+        fetch('/api/uploads').then(function(r) { return r.json(); }),
+        fetch('/api/orphans').then(function(r) { return r.json(); })
+    ]).then(function(results) {
+        var data = results[0];
+        var orphansResp = results[1];
+        var body = document.getElementById('upload-queue-body');
+        if (!body) return;
+        var html = '';
+        // Active uploads
+        var active = (data && data.active) || [];
+        if (active.length > 0) {
+            html += '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:#34d399;margin-bottom:8px">Active Uploads (' + active.length + ')</div>';
+            for (var i = 0; i < active.length; i++) {
+                var c = active[i];
+                var pct = Math.min(Math.max(c.progress || 0, 0), 100);
+                html += renderQueueItem(c, pct);
+            }
+        }
+        // Pending
+        var pending = (data && data.pending) || [];
+        if (pending.length > 0) {
+            if (active.length > 0) html += '<div style="height:1px;background:rgba(255,255,255,0.06);margin:12px 0"></div>';
+            html += '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:#fbbf24;margin-bottom:8px">Pending (' + pending.length + ')</div>';
+            for (var i = 0; i < pending.length; i++) {
+                var p = pending[i];
+                html += '<div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);margin-bottom:4px">'
+                    +   '<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#e4e4e7;font-weight:600">'
+                    +     '<span style="width:5px;height:5px;border-radius:50%;background:#fbbf24;flex-shrink:0"></span>'
+                    +     esc(p.channel || '?')
+                    +   '</div>'
+                    +   '<div style="font-size:9px;color:#71717a;font-family:ui-monospace,monospace;margin-top:2px">' + esc(p.filename || '—') + '</div>'
+                    +   '<div style="font-size:8px;color:#52525b;margin-top:2px">stage: ' + esc(p.stage || '—') + '</div>'
+                    +   (p.failed ? '<div style="font-size:8px;color:#ef4444;margin-top:2px">failed: ' + esc(p.error || '') + '</div>' : '')
+                    + '</div>';
+            }
+        }
+        // History (recently completed / failed)
+        var history = (data && data.history) || [];
+        var completed = history.filter(function(h) { return !h.failed; });
+        var failed = history.filter(function(h) { return h.failed; });
+        if (failed.length > 0) {
+            if (active.length > 0 || pending.length > 0) html += '<div style="height:1px;background:rgba(255,255,255,0.06);margin:12px 0"></div>';
+            html += '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:#ef4444;margin-bottom:8px">Failed (' + failed.length + ')</div>';
+            for (var i = 0; i < failed.length; i++) {
+                var f = failed[i];
+                html += '<div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);margin-bottom:4px">'
+                    +   '<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#e4e4e7;font-weight:600">'
+                    +     '<span style="width:5px;height:5px;border-radius:50%;background:#ef4444;flex-shrink:0"></span>'
+                    +     esc(f.channel || '?') + ' &middot; ' + esc(f.filename || '—')
+                    +   '</div>'
+                    +   '<div style="font-size:8px;color:#ef4444;margin-top:2px">' + esc(f.error || 'unknown error') + '</div>'
+                    +   '<div style="font-size:8px;color:#52525b;margin-top:1px">stage: ' + esc(f.stage || '—') + '</div>'
+                    + '</div>';
+            }
+        }
+        if (completed.length > 0) {
+            if (active.length > 0 || pending.length > 0 || failed.length > 0) html += '<div style="height:1px;background:rgba(255,255,255,0.06);margin:12px 0"></div>';
+            html += '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:#34d399;margin-bottom:8px">Completed (' + completed.length + ')</div>';
+            for (var i = 0; i < completed.length; i++) {
+                var d = completed[i];
+                html += '<div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);margin-bottom:4px">'
+                    +   '<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#e4e4e7;font-weight:600">'
+                    +     '<span style="width:5px;height:5px;border-radius:50%;background:#34d399;flex-shrink:0"></span>'
+                    +     esc(d.channel || '?') + ' &middot; ' + esc(d.filename || '—')
+                    +   '</div>'
+                    +   '<div style="font-size:8px;color:#52525b;margin-top:2px">stage: ' + esc(d.stage || '—') + '</div>'
+                    + '</div>';
+            }
+        }
+        // Orphaned
+        var orphans = (orphansResp && orphansResp.orphans) || [];
+        if (orphans.length > 0) {
+            if (active.length > 0 || pending.length > 0 || failed.length > 0 || completed.length > 0) html += '<div style="height:1px;background:rgba(255,255,255,0.06);margin:12px 0"></div>';
+            html += '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:#f87171;margin-bottom:8px">Orphaned (' + orphans.length + ')</div>';
+            for (var i = 0; i < orphans.length; i++) {
+                var o = orphans[i];
+                html += '<div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);margin-bottom:4px">'
+                    +   '<div style="display:flex;align-items:center;gap:6px">'
+                    +     '<span style="width:5px;height:5px;border-radius:50%;background:#f87171;flex-shrink:0"></span>'
+                    +     '<span style="font-size:10px;color:#e4e4e7;font-weight:600">' + esc(o.filename || '?') + '</span>'
+                    +   '</div>'
+                    +   '<div style="font-size:8px;color:#52525b;margin-top:2px">' + esc(orphanPathShort(o.path || '')) + ' &middot; ' + (o.age || '') + ' &middot; ' + fmtBytes(o.size || 0) + '</div>'
+                    + '</div>';
+            }
+            html += '<button onclick="retryOrphans()" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#f87171;font-size:11px;font-weight:500;cursor:pointer">Retry All Orphans</button>';
+        }
+        if (active.length === 0 && pending.length === 0 && failed.length === 0 && completed.length === 0 && orphans.length === 0) {
+            html = '<div style="color:#52525b;font-size:11px;text-align:center;padding:24px">No activity</div>';
+        }
+        body.innerHTML = html;
+    }).catch(function() {});
+}
+
+function orphanPathShort(p) {
+    var parts = p.replace(/\\/g, '/').split('/');
+    return parts.length > 1 ? parts[parts.length - 2] + '/' + parts[parts.length - 1] : p;
+}
+
+function retryOrphans() {
+    fetch('/api/orphans').then(function(r) { return r.json(); }).then(function(resp) {
+        var orphans = (resp && resp.orphans) || [];
+        if (orphans.length === 0) { alert('No orphaned files found.'); return; }
+        var paths = orphans.map(function(o) { return o.path; });
+        // Split into chunks of 5 so we don't overwhelm the server
+        var chunkSize = 5;
+        for (var i = 0; i < paths.length; i += chunkSize) {
+            var chunk = paths.slice(i, i + chunkSize);
+            (function(c) {
+                fetch('/api/orphans/retry', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paths: c })
+                }).then(function(r) { return r.json(); }).then(function(result) {
+                    var results = result.results || [];
+                    for (var j = 0; j < results.length; j++) {
+                        var r = results[j];
+                        console.log('orphan ' + r.path + ': ' + r.status + (r.error ? ' (' + r.error + ')' : ''));
+                    }
+                }).catch(function(e) { console.error('orphan retry error:', e); });
+            })(chunk);
+        }
+        alert('Retrying ' + orphans.length + ' orphaned file(s) in background.');
+        // Refresh the queue after a few seconds
+        setTimeout(fetchUploadQueue, 3000);
+    }).catch(function() {});
+}
+
+function renderQueueItem(c, pct) {
+    var barColor = pct < 30 ? '#3b82f6' : pct < 70 ? '#8b5cf6' : '#34d399';
+    var hostLabel = (c.host_count || 0) + '/' + (c.host_total || '?');
+    var sizeLabel = '';
+    if (c.bytes_total > 0) sizeLabel = fmtBytes(c.bytes_current || 0) + ' / ' + fmtBytes(c.bytes_total);
+    var speedLabel = c.speed || '';
+    var html = '<div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);margin-bottom:4px">'
+        +   '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+        +     '<span style="width:5px;height:5px;border-radius:50%;background:' + barColor + ';flex-shrink:0"></span>'
+        +     '<span style="font-size:10px;color:#e4e4e7;font-weight:600">' + esc(c.channel || '?') + '</span>'
+        +     '<span style="font-size:8px;color:#52525b;margin-left:auto">' + hostLabel + '</span>'
+        +   '</div>'
+        +   '<div style="font-size:9px;color:#71717a;font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px">' + esc(c.filename || '—') + '</div>'
+        +   '<div style="font-size:8px;color:#52525b;margin-bottom:4px">' + esc(c.status || '—')
+        +     (speedLabel ? ' <span style="color:#34d399">' + speedLabel + '</span>' : '')
+        +     (sizeLabel ? ' <span style="color:#71717a">' + sizeLabel + '</span>' : '')
+        +   '</div>'
+        +   '<div style="height:3px;border-radius:3px;background:rgba(255,255,255,0.05);overflow:hidden;margin-bottom:4px">'
+        +     '<div style="height:100%;border-radius:3px;background:linear-gradient(90deg,' + barColor + ',' + (pct < 70 ? '#8b5cf6' : '#34d399') + ');width:' + pct + '%;transition:width 0.5s"></div>'
+        +   '</div>';
+    if (c.hosts && c.hosts.length > 0) {
+        html += '<div style="display:flex;flex-direction:column;gap:3px;padding:4px 0 0 0">';
+        for (var j = 0; j < c.hosts.length; j++) {
+            var h = c.hosts[j];
+            var hBarColor, hLabel, hLabelColor;
+            if (h.status === 'done') { hBarColor = '#34d399'; hLabel = '✓'; hLabelColor = '#34d399'; }
+            else if (h.status === 'failed') { hBarColor = '#ef4444'; hLabel = '✗'; hLabelColor = '#ef4444'; }
+            else if (h.status === 'uploading') {
+                var hp = Math.min(Math.max(h.progress || 0, 0), 100);
+                hBarColor = hp < 30 ? '#60a5fa' : hp < 70 ? '#a78bfa' : '#34d399';
+                hLabel = Math.round(hp) + '%';
+                hLabelColor = '#a1a1aa';
+            } else { hBarColor = '#3f3f46'; hLabel = '•'; hLabelColor = '#52525b'; }
+            var hPct = Math.min(Math.max(h.progress || 0, 0), 100);
+            var hSize = '';
+            if (h.bytes_total > 0) hSize = fmtBytes(h.bytes_current || 0) + '/' + fmtBytes(h.bytes_total);
+            var hSpeed = h.speed ? '<span style="color:#34d399;font-size:8px">' + h.speed + '</span>' : '';
+            html += '<div style="display:flex;align-items:center;gap:4px">'
+                +   '<span style="font-size:8px;color:' + hLabelColor + ';font-weight:700;width:16px;text-align:right;flex-shrink:0">' + hLabel + '</span>'
+                +   '<span style="font-size:8px;color:#71717a;font-weight:600;width:48px;flex-shrink:0">' + esc(h.host || '') + '</span>'
+                +   '<div style="flex:1;height:2px;border-radius:2px;background:rgba(255,255,255,0.05);overflow:hidden;min-width:40px">'
+                +     '<div style="height:100%;border-radius:2px;background:' + hBarColor + ';width:' + hPct + '%;transition:width 0.5s"></div>'
+                +   '</div>'
+                +   hSpeed
+                +   (hSize ? '<span style="font-size:7px;color:#52525b;font-family:ui-monospace,monospace;white-space:nowrap;width:60px;text-align:right">' + hSize + '</span>' : '')
+                + '</div>';
+        }
+        html += '</div>';
+    }
+    html += '</div>';
+    return html;
+}
+
+// ── Upload state renderer (called from SSE "upload" event) ──
+var _lastUploadState = '';
+
+function renderUploadState(s) {
+    // Skip if nothing changed (cheap JSON compare)
+    var key = JSON.stringify(s || {});
+    if (key === _lastUploadState) return;
+    _lastUploadState = key;
+
+    var activeCount = 0;
+    if (s && s.active && s.channels) {
+        for (var i = 0; i < s.channels.length; i++) {
+            if (s.channels[i].filename) activeCount++;
+        }
+    }
+
+    // Badge
+    var badge = document.getElementById('session-badge-upload');
+    if (badge) {
+        if (!s || !s.active || !s.channels || s.channels.length === 0) {
+            badge.style.display = 'none';
+        } else {
+            badge.style.display = 'inline-flex';
+            var dot = badge.querySelector('.upload-dot');
+            if (dot) dot.classList.add('upload-dot-pulse');
+            var bc = document.getElementById('session-badge-upload-count');
+            if (bc) bc.textContent = activeCount;
+        }
+    }
+
+    // Upload bar
+    var bar = document.getElementById('upload-bar');
+    var barList = document.getElementById('upload-bar-list');
+    var barCount = document.getElementById('upload-bar-count');
+    if (bar && barList && barCount) {
+        if (!s || !s.active || !s.channels || s.channels.length === 0) {
+            bar.style.display = 'none';
+            return;
+        }
+        bar.style.display = 'block';
+        barCount.textContent = activeCount + ' active';
+
+        var html = '';
+        for (var i = 0; i < s.channels.length; i++) {
+            var c = s.channels[i];
+            var pct = Math.min(Math.max(c.progress || 0, 0), 100);
+            var hostLabel = (c.host_count || 0) + '/' + (c.host_total || '?');
+            var sizeLabel = '';
+            if (c.bytes_total > 0) {
+                sizeLabel = fmtBytes(c.bytes_current || 0) + ' / ' + fmtBytes(c.bytes_total);
+            }
+            var speedLabel = c.speed || '';
+            var barColor = pct < 30 ? '#3b82f6' : pct < 70 ? '#8b5cf6' : '#34d399';
+
+            html += '<div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03)">'
+                  +   '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+                  +     '<span style="width:5px;height:5px;border-radius:50%;background:' + barColor + ';flex-shrink:0"></span>'
+                  +     '<span style="font-size:10px;color:#e4e4e7;font-weight:600">' + esc(c.channel || '?') + '</span>'
+                  +     '<span style="font-size:8px;color:#52525b;margin-left:auto">' + hostLabel + '</span>'
+                  +   '</div>'
+                  +   '<div style="font-size:9px;color:#71717a;font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px">' + esc(c.filename || '—') + '</div>'
+                  +   '<div style="font-size:8px;color:#52525b;margin-bottom:4px">' + esc(c.status || '—')
+                  +     (speedLabel ? ' <span style="color:#34d399">' + speedLabel + '</span>' : '')
+                  +     (sizeLabel ? ' <span style="color:#71717a">' + sizeLabel + '</span>' : '')
+                  +   '</div>'
+                  +   '<div style="height:3px;border-radius:3px;background:rgba(255,255,255,0.05);overflow:hidden;margin-bottom:4px">'
+                  +     '<div style="height:100%;border-radius:3px;background:linear-gradient(90deg,' + barColor + ',' + (pct < 70 ? '#8b5cf6' : '#34d399') + ');width:' + pct + '%;transition:width 0.5s"></div>'
+                  +   '</div>';
+
+            // Per-host rows
+            if (c.hosts && c.hosts.length > 0) {
+                html += '<div style="display:flex;flex-direction:column;gap:3px;padding:4px 0 0 0">';
+                for (var j = 0; j < c.hosts.length; j++) {
+                    var h = c.hosts[j];
+                    var hBarColor, hLabel, hLabelColor;
+                    if (h.status === 'done') {
+                        hBarColor = '#34d399';
+                        hLabel = '✓';
+                        hLabelColor = '#34d399';
+                    } else if (h.status === 'failed') {
+                        hBarColor = '#ef4444';
+                        hLabel = '✗';
+                        hLabelColor = '#ef4444';
+                    } else if (h.status === 'uploading') {
+                        var hp = Math.min(Math.max(h.progress || 0, 0), 100);
+                        hBarColor = hp < 30 ? '#60a5fa' : hp < 70 ? '#a78bfa' : '#34d399';
+                        hLabel = Math.round(hp) + '%';
+                        hLabelColor = '#a1a1aa';
+                    } else {
+                        hBarColor = '#3f3f46';
+                        hLabel = '•';
+                        hLabelColor = '#52525b';
+                    }
+                    var hPct = Math.min(Math.max(h.progress || 0, 0), 100);
+                    var hSize = '';
+                    if (h.bytes_total > 0) {
+                        hSize = fmtBytes(h.bytes_current || 0) + '/' + fmtBytes(h.bytes_total);
+                    }
+                    var hSpeed = h.speed ? '<span style="color:#34d399;font-size:8px">' + h.speed + '</span>' : '';
+                    html += '<div style="display:flex;align-items:center;gap:4px">'
+                          +   '<span style="font-size:8px;color:' + hLabelColor + ';font-weight:700;width:16px;text-align:right;flex-shrink:0">' + hLabel + '</span>'
+                          +   '<span style="font-size:8px;color:#71717a;font-weight:600;width:48px;flex-shrink:0">' + esc(h.host || '') + '</span>'
+                          +   '<div style="flex:1;height:2px;border-radius:2px;background:rgba(255,255,255,0.05);overflow:hidden;min-width:40px">'
+                          +     '<div style="height:100%;border-radius:2px;background:' + hBarColor + ';width:' + hPct + '%;transition:width 0.5s"></div>'
+                          +   '</div>'
+                          +   hSpeed
+                          +   (hSize ? '<span style="font-size:7px;color:#52525b;font-family:ui-monospace,monospace;white-space:nowrap;width:60px;text-align:right">' + hSize + '</span>' : '')
+                          + '</div>';
+                }
+                html += '</div>';
+            }
+
+            html += '</div>';
+        }
+        barList.innerHTML = html;
+    }
+}
+
+function fmtBytes(b) {
+    if (!b || b === 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var i = 0;
+    var v = b;
+    while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i++;
+    }
+    return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
+}
+
+function esc(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 // ── Session countdown ──
 (function() {
     var dataEl = document.getElementById('session-data');
@@ -1261,6 +1671,7 @@ document.querySelectorAll('.log-container').forEach(function(container) {
     var badgeTime = document.getElementById('session-badge-time');
     var cardTime = document.getElementById('session-card-time');
     var cardProgress = document.getElementById('session-card-progress');
+    var cardSub = document.getElementById('session-card-sub');
     if (!badgeTime || !cardTime || !cardProgress) return;
     function tick() {
         var now = Math.floor(Date.now() / 1000);
@@ -1271,8 +1682,10 @@ document.querySelectorAll('.log-container').forEach(function(container) {
             cardTime.textContent = txt;
             cardProgress.style.width = '100%';
             cardProgress.style.background = 'linear-gradient(90deg, #f59e0b, #f97316)';
+            if (cardSub) cardSub.textContent = deadline ? 'Processing' : '';
             return;
         }
+        if (cardSub) cardSub.textContent = '';
         var h = Math.floor(rem / 3600);
         var m = Math.floor((rem % 3600) / 60);
         var s = rem % 60;
@@ -1290,19 +1703,26 @@ document.querySelectorAll('.log-container').forEach(function(container) {
     };
     window.confirmStopSession = function() {
         if (!confirm('Stop all channels and start processing now?')) return;
-        fetch('/api/session/stop', { method: 'POST' })
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (d.success) {
-                    document.getElementById('session-card').classList.add('hidden');
-                    deadline = 0;
-                }
-            });
+        fetch('/api/session/stop', { method: 'POST' });
+        // Auto-open the session card so user sees processing start
+        var card = document.getElementById('session-card');
+        if (card) card.classList.remove('hidden');
     };
     document.addEventListener('click', function(e) {
         var fl = document.getElementById('session-floating');
         if (fl && !fl.contains(e.target)) document.getElementById('session-card')?.classList.add('hidden');
     });
+
+    // Lightweight upload bar poll — fetches from API every 4s (no SSE dependency).
+    // This replaces the old 2-second fallback that relied on window.__uploadState
+    // and the info-panel upload detection which caused flickering.
+    setInterval(function() {
+        fetch('/api/uploads').then(function(r) { return r.json(); }).then(function(data) {
+            if (!data) return;
+            window.__uploadState = data;
+            renderUploadState(data);
+        }).catch(function(){});
+    }, 4000);
 })();
 
 function updateDomainPrefix() {

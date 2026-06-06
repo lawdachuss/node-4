@@ -17,6 +17,7 @@ type IManager interface {
 	ChannelInfo() []*entity.ChannelInfo
 	Publish(name string, ch *entity.ChannelInfo)
 	PublishLog(username, line string)
+	PublishUploadState()
 	Subscriber(w http.ResponseWriter, r *http.Request)
 	LoadConfig() error
 	SaveConfig() error
@@ -29,4 +30,5 @@ type IManager interface {
 	IsFileUploadInFlight(filePath string) bool
 	SessionInfo() (time.Duration, bool)
 	TriggerSessionStop()
+	UploadEntries() *entity.UploadsResponse
 }
