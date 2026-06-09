@@ -883,7 +883,7 @@ func extractUsernameFromFilename(filename string) string {
 		return ""
 	}
 	rest := stem[idx+1:]
-	if len(rest) < 10 || rest[3] != '-' || rest[6] != '-' {
+	if len(rest) < 10 || rest[4] != '-' || rest[7] != '-' {
 		return ""
 	}
 
