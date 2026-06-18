@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,21 +23,78 @@ type imgbbResponse struct {
 	Error  json.RawMessage `json:"error,omitempty"`
 }
 
+// imgbbKeyRing manages multiple API keys and rotates through them on
+// rate-limit errors.  Keys are read from the IMGBB_API_KEY env var,
+// which may be a comma-separated list (e.g. "key1,key2,key3").
+type imgbbKeyRing struct {
+	mu    sync.Mutex
+	keys  []string
+	index int
+}
+
+func newImgbbKeyRing() *imgbbKeyRing {
+	raw := os.Getenv("IMGBB_API_KEY")
+	var keys []string
+	for _, k := range strings.Split(raw, ",") {
+		k = strings.TrimSpace(k)
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return &imgbbKeyRing{keys: keys}
+}
+
+func (kr *imgbbKeyRing) current() string {
+	kr.mu.Lock()
+	defer kr.mu.Unlock()
+	if len(kr.keys) == 0 {
+		return ""
+	}
+	return kr.keys[kr.index]
+}
+
+func (kr *imgbbKeyRing) rotate() {
+	kr.mu.Lock()
+	defer kr.mu.Unlock()
+	if len(kr.keys) > 1 {
+		kr.index = (kr.index + 1) % len(kr.keys)
+	}
+}
+
+func (kr *imgbbKeyRing) count() int {
+	kr.mu.Lock()
+	defer kr.mu.Unlock()
+	return len(kr.keys)
+}
+
+// ImgBBUploader handles uploading images to ImgBB with automatic
+// key rotation on rate-limit errors.
 type ImgBBUploader struct {
-	apiKey string
+	keys   *imgbbKeyRing
 	client *http.Client
 }
 
 func NewImgBBUploader() *ImgBBUploader {
-	key := os.Getenv("IMGBB_API_KEY")
 	return &ImgBBUploader{
-		apiKey: key,
+		keys:   newImgbbKeyRing(),
 		client: newNoProxyClient(60 * time.Second),
 	}
 }
 
+// isRateLimitError returns true if the response indicates a rate-limit hit
+// (HTTP 429 or "rate limit" in the error message).
+func isRateLimitError(statusCode int, body []byte) bool {
+	if statusCode == 429 {
+		return true
+	}
+	return strings.Contains(strings.ToLower(string(body)), "rate limit")
+}
+
+// Upload uploads an image file to ImgBB.  On rate-limit errors the key ring
+// is rotated and the upload retried with the next key.  Each key is tried at
+// most once per call to avoid hammering a rate-limited key with backoff.
 func (u *ImgBBUploader) Upload(filePath string) (string, error) {
-	if u.apiKey == "" {
+	if u.keys.count() == 0 {
 		return "", fmt.Errorf("imgbb: IMGBB_API_KEY not set")
 	}
 
@@ -46,43 +104,44 @@ func (u *ImgBBUploader) Upload(filePath string) (string, error) {
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
-	form := url.Values{
-		"key":   {u.apiKey},
-		"image": {encoded},
-	}
 
-	// Retry on rate-limit errors with exponential backoff
-	maxAttempts := 5
+	// Try each key at most once (rotate on rate-limit).
+	attempts := u.keys.count()
 	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if attempt > 1 {
-			backoff := time.Duration(1<<uint(attempt-1)) * time.Second // 2s, 4s, 8s, 16s
-			time.Sleep(backoff)
+	for i := 0; i < attempts; i++ {
+		key := u.keys.current()
+		form := url.Values{
+			"key":   {key},
+			"image": {encoded},
 		}
 
 		resp, err := u.client.PostForm(imgbbAPIURL, form)
 		if err != nil {
 			lastErr = fmt.Errorf("imgbb: post: %w", err)
-			if attempt < maxAttempts {
-				continue
-			}
-			return "", lastErr
+			u.keys.rotate()
+			continue
 		}
 
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
-		resp.Body.Close() // close immediately — no defer inside loop
-		if err != nil {
-			lastErr = fmt.Errorf("imgbb: read response: %w", err)
-			if attempt < maxAttempts {
-				continue
-			}
-			return "", lastErr
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+		resp.Body.Close()
+
+		if readErr != nil {
+			lastErr = fmt.Errorf("imgbb: read response: %w", readErr)
+			u.keys.rotate()
+			continue
 		}
 
-		// Check for HTTP-level rate limiting (429)
 		if resp.StatusCode == 429 {
 			lastErr = fmt.Errorf("imgbb: rate limited (HTTP 429)")
-			if attempt < maxAttempts {
+			u.keys.rotate()
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("imgbb: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			// Rotate on rate-limit messages
+			if isRateLimitError(resp.StatusCode, body) {
+				u.keys.rotate()
 				continue
 			}
 			return "", lastErr
@@ -91,15 +150,12 @@ func (u *ImgBBUploader) Upload(filePath string) (string, error) {
 		var result imgbbResponse
 		if err := json.Unmarshal(body, &result); err != nil {
 			lastErr = fmt.Errorf("imgbb: parse response: %w", err)
-			if attempt < maxAttempts {
-				continue
-			}
-			return "", lastErr
+			u.keys.rotate()
+			continue
 		}
 
 		if result.Status != 200 {
 			msg := string(result.Error)
-			// ImgBB error is an object like {"message":"...","code":...}; extract message if possible.
 			var errObj struct {
 				Message string `json:"message"`
 			}
@@ -111,14 +167,10 @@ func (u *ImgBBUploader) Upload(filePath string) (string, error) {
 			}
 			err = fmt.Errorf("imgbb: error: %s", msg)
 			lastErr = err
-			// Retry on rate-limit error messages
-			if strings.Contains(strings.ToLower(msg), "rate limit") {
-				if attempt < maxAttempts {
-					continue
-				}
-				return "", lastErr
+			if isRateLimitError(result.Status, []byte(msg)) {
+				u.keys.rotate()
+				continue
 			}
-			// Non-rate-limit errors are fatal — don't retry
 			return "", err
 		}
 

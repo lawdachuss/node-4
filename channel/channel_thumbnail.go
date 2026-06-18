@@ -45,14 +45,17 @@ func GenerateThumbnailForFile(videoPath string) (thumbURL, spriteURL, previewURL
 }
 
 // generateThumbnailForFile creates a static thumbnail (JPEG), a multi-frame sprite
-// sheet (JPEG), and an animated WebP preview covering the full video duration. All
-// three are uploaded to remote image hosts and the URLs returned.  Local
+// sheet (JPEG), and an animated GIF preview covering the full video duration.
+// All three are uploaded to remote image hosts and the URLs returned.  Local
 // temp files are always cleaned up.
 //
-// JPEG at quality 85 is used for thumbnail and sprite because:
+// JPEG is used for thumbnail and sprite because:
 //   - All image hosts support it (Pixhost, ImgBB, Catbox)
 //   - mjpeg encoder is fast (minimal encoding lag)
 //   - Small filesize with good visual quality
+//
+// GIF is used for the animated preview because Pixhost (the primary image host)
+// does not support WebP.  GIF works on all three image hosts.
 //
 // Thumbnail, sprite, and preview run in parallel with independent timeouts:
 //   - thumbnail: 5 min  (single-frame seek)
@@ -230,14 +233,16 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		}
 	}()
 
-	// ── Animated WebP preview covering the FULL video duration ──────────────
-	// Each frame is 320px wide. WebP is far smaller than GIF at same quality.
-	// fps is calculated so that the selected frame count is spread evenly across
-	// the entire video.  Longer recordings get more frames for smoother playback:
-	//   <1 min:   40 frames (1 frame per ~1.5s)
+	// ── Animated GIF preview covering the FULL video duration ──────────────
+	// GIF is chosen over WebP because Pixhost (the primary image host) does
+	// not support WebP.  GIF works on all three image hosts (Pixhost, ImgBB,
+	// Catbox), avoiding the fallback-chain failures that plagued WebP uploads.
+	//
+	// Frames are spread evenly across the video.  Longer recordings get more
+	// frames for smoother playback:
+	//   <1 min:   40 frames
 	//   1-10 min: 60 frames
 	//   10-60+min: 80 frames
-	// For short videos (<5 s) fps is capped at previewFPS (8) for smooth playback.
 	// Same 15-minute timeout as the sprite for long videos.
 	go func() {
 		defer func() {
@@ -249,10 +254,9 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		previewCtx, previewCancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer previewCancel()
 
-		previewWEBP := videoPath + ".preview.webp"
-		defer os.Remove(previewWEBP)
+		previewGIF := videoPath + ".preview.gif"
+		defer os.Remove(previewGIF)
 
-		// More frames for longer videos = smoother preview.
 		previewFrames := previewBaseFrames
 		if dur > 60 {
 			previewFrames = 60
@@ -261,33 +265,29 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 			previewFrames = 80
 		}
 
-		// Spread previewFrames across the full duration.
-		// fps = frames / duration, capped at previewFPS for short videos.
-		previewRate := float64(previewFPS) // cap at 8 fps
+		previewRate := float64(previewFPS)
 		if dur > 0 {
 			if r := float64(previewFrames) / dur; r < previewRate {
-				previewRate = r // slower fps to cover full duration
+				previewRate = r
 			}
 		}
-		// scale down to previewWidth, lanczos for sharp scaling.
-		vf := fmt.Sprintf(
-			"fps=%.4f,scale=%d:-1:flags=lanczos",
+
+		gifVF := fmt.Sprintf(
+			"fps=%.4f,scale=%d:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=256[p];[s1][p]paletteuse",
 			previewRate,
 			previewWidth,
 		)
 
 		config.AcquireFFmpeg()
-		defer config.ReleaseFFmpeg()
 		err := config.FFmpegCommandContext(previewCtx,
 			"-y",
 			"-i", videoPath,
-			"-vf", vf,
+			"-vf", gifVF,
 			"-frames:v", strconv.Itoa(previewFrames),
-			"-c:v", "libwebp_anim",
-			"-quality", "75",
 			"-loop", "0",
-			previewWEBP,
+			previewGIF,
 		).Run()
+		config.ReleaseFFmpeg()
 
 		if err != nil {
 			errFn("preview: failed for %s: %v", baseName, err)
@@ -296,7 +296,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		}
 
 		imgUploader := uploader.NewMultiImageUploader()
-		if remoteURL, _, uploadErr := imgUploader.Upload(previewWEBP); uploadErr == nil {
+		if remoteURL, _, uploadErr := imgUploader.Upload(previewGIF); uploadErr == nil {
 			info("preview: ✓ %s", baseName)
 			previewDone <- remoteURL
 		} else {

@@ -39,21 +39,13 @@ func NewThumbnailUploader(apiKey string) *ThumbnailUploader {
 }
 
 // Upload uploads a thumbnail image to Pixhost.to and returns the direct image URL.
-// Pixhost only supports JPEG, PNG, and GIF — WebP files are rejected with a fast
-// error so the caller can fall through to hosts that support WebP (e.g. Catbox.moe).
+// Pixhost supports JPEG, PNG, and GIF.
 //
 // The file is opened once and streamed through both upload strategies without
 // loading the entire image into RAM.  Only the multipart preamble (headers +
 // form fields, < 512 B) is buffered in memory.
 func (t *ThumbnailUploader) Upload(thumbnailPath string) (string, error) {
 	log.Printf("Uploading thumbnail to Pixhost.to: %s", thumbnailPath)
-
-	// ── Fast-fail for WebP ─────────────────────────────────────────────────
-	// Pixhost returns 414 "Unexpected File Format" for WebP. Skip immediately
-	// so the caller's fallback chain (→ Catbox.moe) handles it without delay.
-	if strings.EqualFold(filepath.Ext(thumbnailPath), ".webp") {
-		return "", fmt.Errorf("Pixhost does not support WebP format — use a host that supports it (e.g. Catbox.moe)")
-	}
 
 	fi, err := os.Stat(thumbnailPath)
 	if err != nil {
