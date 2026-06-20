@@ -165,6 +165,11 @@ func isRetryableCatboxError(err error) bool {
 		return true
 	}
 
+	// File stat errors — retry (AV scanner race on Windows)
+	if strings.Contains(errStr, "stat file") {
+		return true
+	}
+
 	// Network/connection errors — retry
 	if strings.Contains(errStr, "send request") {
 		return true
