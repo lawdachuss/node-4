@@ -61,6 +61,7 @@ type Coordinator struct {
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
 	started  bool
+	draining bool // set during graceful shutdown; prevents heartbeat from clobbering status
 	mu       sync.Mutex
 }
 
@@ -176,6 +177,9 @@ func (c *Coordinator) StartDraining() {
 	if !c.IsPooled() || c.Client == nil {
 		return
 	}
+	c.mu.Lock()
+	c.draining = true
+	c.mu.Unlock()
 	if err := c.Client.UpdateNodeStatus(c.NodeID, "draining"); err != nil {
 		log.Printf("[coordinator] error setting draining: %v", err)
 	}

@@ -755,11 +755,21 @@ func (c *Client) UpsertNode(node *Node) error {
 	return nil
 }
 
-// HeartbeatNode updates the last_heartbeat timestamp for a node.
+// HeartbeatNode updates the last_heartbeat timestamp and current load for a node.
 func (c *Client) HeartbeatNode(nodeID string, currentLoad int) error {
 	return c.patch(fmt.Sprintf("/nodes?node_id=eq.%s", url.QueryEscape(nodeID)), map[string]interface{}{
 		"last_heartbeat": "now()",
 		"current_load":   currentLoad,
+	})
+}
+
+// EnsureNodeOnline sets status=online for a node that is currently offline or
+// unknown.  Used by the heartbeat loop to recover from a "stuck offline"
+// state (e.g. reaper marked offline during a restart gap).  Does nothing if
+// the node is already online or draining.
+func (c *Client) EnsureNodeOnline(nodeID string) error {
+	return c.patch(fmt.Sprintf("/nodes?node_id=eq.%s&status=neq.online&status=neq.draining", url.QueryEscape(nodeID)), map[string]interface{}{
+		"status": "online",
 	})
 }
 
