@@ -11,6 +11,14 @@
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" /></noscript>
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
     <title>Channel Pool — StreamBate</title>
+    <script>
+        (function(){
+            if (localStorage.getItem('darkMode') === 'true' ||
+                (localStorage.getItem('darkMode') === null && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+        })();
+    </script>
     <style>
         :root {
             --bg-body: #0a0a0c;
@@ -121,6 +129,7 @@
             <a href="/nodes">Nodes</a>
             <a href="/videos">Videos</a>
             <a href="javascript:void(0)" onclick="location.reload()">Refresh</a>
+            <a href="javascript:void(0)" onclick="toggleTheme()" id="theme-btn" style="font-size:14px">🌙</a>
         </div>
     </div>
 
@@ -240,6 +249,22 @@ function removeFromPool(username, site) {
             return r.text().then(function(t) { alert('Failed: ' + t); });
         }
     }).catch(function(e) { alert('Error: ' + e); });
+}
+</script>
+<script>
+(function() {
+    var btn = document.getElementById('theme-btn');
+    if (btn) {
+        btn.textContent = document.documentElement.classList.contains('dark') ? '☀️' : '🌙';
+    }
+})();
+function toggleTheme() {
+    var html = document.documentElement;
+    html.classList.toggle('dark');
+    var isDark = html.classList.contains('dark');
+    localStorage.setItem('darkMode', isDark);
+    var btn = document.getElementById('theme-btn');
+    if (btn) btn.textContent = isDark ? '☀️' : '🌙';
 }
 </script>
 </body>

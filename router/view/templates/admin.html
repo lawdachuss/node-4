@@ -423,6 +423,7 @@
             <a href="javascript:void(0)" onclick="location.reload()">Refresh</a>
             <a href="javascript:void(0)" onclick="stopAllChannels()"
                style="background:rgba(239,68,68,0.12);color:#ef4444;border-color:rgba(239,68,68,0.2)">⏹ Stop All</a>
+            <a href="javascript:void(0)" onclick="toggleTheme()" id="theme-btn" style="font-size:14px">🌙</a>
         </div>
     </div>
 
@@ -970,6 +971,12 @@
         if (ar.checked) scheduleRefresh();
     }
 
+    // Theme toggle button
+    var themeBtn = document.getElementById('theme-btn');
+    if (themeBtn) {
+        themeBtn.textContent = document.documentElement.classList.contains('dark') ? '☀️' : '🌙';
+    }
+
     // Persist section open/closed state
     var sections = document.querySelectorAll('details.section');
     sections.forEach(function(s) {
@@ -999,6 +1006,15 @@ function scheduleRefresh() {
     refreshTimer = setTimeout(function() {
         location.reload();
     }, 30000);
+}
+
+function toggleTheme() {
+    var html = document.documentElement;
+    html.classList.toggle('dark');
+    var isDark = html.classList.contains('dark');
+    localStorage.setItem('darkMode', isDark);
+    var btn = document.getElementById('theme-btn');
+    if (btn) btn.textContent = isDark ? '☀️' : '🌙';
 }
 
 function stopAllChannels() {
