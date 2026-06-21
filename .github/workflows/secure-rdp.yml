@@ -522,6 +522,8 @@ jobs:
             "# Pooled mode env vars (distributed shards)",
             "`$env:CHANNEL_POOL_MODE = `"${{ secrets.CHANNEL_POOL_MODE }}`"",
             "`$env:NODE_ID = `"${{ secrets.NODE_ID }}`"",
+            "# Session duration controls how long the DVR records before uploading and cycling",
+            "`$env:SESSION_DURATION = `"${{ secrets.SESSION_DURATION }}`"",
             "`$env:USER_AGENT = `"$env:USER_AGENT`"",
             "# Disable HTTP_PROXY/HTTPS_PROXY for Go's default transport",
             "# to prevent Go from trying to use SOCKS5 as HTTP proxy.",
@@ -864,6 +866,8 @@ jobs:
             Write-Warning ".env file NOT found at $repoDir\.env"
           }
           
+          # Pass SESSION_DURATION to DVR so it uses the configured session length
+          $env:SESSION_DURATION = "${{ secrets.SESSION_DURATION }}"
           $dvrProcess = Start-Process -FilePath $dvrExe -ArgumentList "--no-tunnel --output-dir `"$videosDir`"" -WorkingDirectory $repoDir -NoNewWindow -RedirectStandardOutput $dvrLog -RedirectStandardError "$repoDir\dvr-err.log" -PassThru
           Write-Host "[OK] DVR PID: $($dvrProcess.Id)"
           
@@ -1029,8 +1033,15 @@ jobs:
             if ($dvrProcess.HasExited) {
               Write-Host "[WARNING] DVR process exited (code: $($dvrProcess.ExitCode)) - restarting..."
               # Pass remaining session time so the restarted DVR stops recordings at the right moment.
-              # Session ends at 5h20m from workflow start; subtract elapsed time to get what's left.
-              $sessionTotalSecs = 5 * 3600 + 20 * 60
+              # Parse total session duration from secret (e.g. "5h20m0s") or fall back to 5h20m.
+              $sessionTotalStr = "${{ secrets.SESSION_DURATION }}"
+              if ([string]::IsNullOrEmpty($sessionTotalStr)) { $sessionTotalStr = "5h20m0s" }
+              $durMatch = [regex]::Match($sessionTotalStr, '(\d+)h(\d+)m(\d+)s')
+              if ($durMatch.Success) {
+                $sessionTotalSecs = [int]$durMatch.Groups[1].Value * 3600 + [int]$durMatch.Groups[2].Value * 60 + [int]$durMatch.Groups[3].Value
+              } else {
+                $sessionTotalSecs = 5 * 3600 + 20 * 60
+              }
               $remainingSessionSecs = [Math]::Max(60, $sessionTotalSecs - $elapsed)
               $remainingMins = [Math]::Floor($remainingSessionSecs / 60)
               $remainingSecs2 = $remainingSessionSecs % 60
