@@ -304,6 +304,20 @@ func (m *Manager) LoadPooledConfig() error {
 		return fmt.Errorf("get node assignments: %w", err)
 	}
 
+	// If channel_assignments is empty, migrate from old isolated-mode app_settings blob
+	if len(myAssignments) == 0 {
+		migrated, err := m.migrateLegacyChannels(client)
+		if err != nil {
+			fmt.Printf("[manager] legacy migration: %v\n", err)
+		} else if migrated > 0 {
+			fmt.Printf("[manager] migrated %d channel(s) from legacy app_settings\n", migrated)
+			myAssignments, err = client.GetNodeAssignments(server.NodeID())
+			if err != nil {
+				return fmt.Errorf("get node assignments after migration: %w", err)
+			}
+		}
+	}
+
 	created := 0
 	for _, a := range myAssignments {
 		if a.Status == "unassigned" || a.AssignedNode == "" {
@@ -351,6 +365,50 @@ func (m *Manager) LoadPooledConfig() error {
 	}
 
 	return nil
+}
+
+// migrateLegacyChannels reads the old isolated-mode channel list from
+// app_settings (key: channels_<INSTANCE_ID>) and inserts each channel as
+// an unassigned row in channel_assignments. This lets existing setups
+// transition to pooled mode without losing their channel configuration.
+func (m *Manager) migrateLegacyChannels(client *database.Client) (int, error) {
+	data := server.LoadChannelsFromDB()
+	if data == nil {
+		return 0, nil
+	}
+
+	var configs []*entity.ChannelConfig
+	if err := json.Unmarshal(data, &configs); err != nil {
+		return 0, fmt.Errorf("unmarshal legacy channels: %w", err)
+	}
+	if len(configs) == 0 {
+		return 0, nil
+	}
+
+	var assignments []database.ChannelAssignment
+	for _, conf := range configs {
+		conf.Sanitize()
+		assignments = append(assignments, database.ChannelAssignment{
+			Username:                conf.Username,
+			Site:                    conf.Site,
+			Status:                  "unassigned",
+			IsLive:                  false,
+			Framerate:               conf.Framerate,
+			Resolution:              conf.Resolution,
+			Pattern:                 conf.Pattern,
+			MaxDuration:             conf.MaxDuration,
+			MaxFilesize:             conf.MaxFilesize,
+			Compress:                conf.Compress,
+			MinDurationBeforeUpload: conf.MinDurationBeforeUpload,
+		})
+	}
+
+	if err := client.BulkInsertAssignments(assignments); err != nil {
+		return 0, fmt.Errorf("bulk insert assignments: %w", err)
+	}
+
+	fmt.Printf("[manager] migrateLegacyChannels: migrated %d channel(s) to channel_assignments\n", len(assignments))
+	return len(assignments), nil
 }
 
 // CreateChannelFromAssignment implements coordinator.ChannelManager.

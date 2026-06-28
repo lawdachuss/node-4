@@ -319,7 +319,6 @@ jobs:
             --accept-routes `
             --accept-dns=false `
             --timeout=60s `
-            --reset
           if ($LASTEXITCODE -ne 0) { Write-Error "tailscale up failed"; exit 1 }
 
           Write-Host "-------- TAILSCALE STATUS --------"
@@ -337,6 +336,7 @@ jobs:
 
           echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
           Write-Host "[OK] Tailscale IP: $ip"
+          $LASTEXITCODE = 0
 
       - name: Verify Proxy + Tailscale
         shell: powershell

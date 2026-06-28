@@ -30,19 +30,11 @@ func init() {
 	channelPoolMode = detectPoolMode()
 }
 
-// detectPoolMode auto-detects pooled mode:
-// 1. CHANNEL_POOL_MODE env var (explicit override)
-// 2. GITHUB_REPOSITORY env var — auto-enable if path contains "node-"
-// 3. Default to "isolated"
+// detectPoolMode returns the channel pool mode.
+// Only uses the explicit CHANNEL_POOL_MODE env var; defaults to "isolated".
 func detectPoolMode() string {
 	if mode := os.Getenv("CHANNEL_POOL_MODE"); mode != "" {
 		return mode
-	}
-	if repo := os.Getenv("GITHUB_REPOSITORY"); repo != "" {
-		// Auto-enable pooled mode for repos named node-*
-		if strings.Contains(repo, "node-") {
-			return entity.PoolModePooled
-		}
 	}
 	return entity.PoolModeIsolated
 }
