@@ -409,7 +409,7 @@ jobs:
             [System.IO.File]::WriteAllText("$repoDir\.env", $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
             Write-Host "[OK] Wrote .env from secret"
           } else {
-            Write-Warning "MINI_ENV secret is empty — cookie grabber may have no base config"
+            Write-Warning "MINI_ENV secret is empty - cookie grabber may have no base config"
           }
 
           # Clear COOKIES from .env so the grabber starts fresh (no old cookies)
@@ -420,7 +420,7 @@ jobs:
             $newLines = $lines | Where-Object { $_ -notmatch '^COOKIES=' }
             $newContent = $newLines -join "`r`n"
             [System.IO.File]::WriteAllText($envPath, $newContent, (New-Object System.Text.UTF8Encoding($false)))
-            Write-Host "[OK] Cleared COOKIES from .env — grabbing fresh"
+            Write-Host "[OK] Cleared COOKIES from .env - grabbing fresh"
           }
 
           Set-Location $repoDir
@@ -430,7 +430,7 @@ jobs:
           go build -o grab-cookies.exe ./cmd/grab_cookies 2>&1
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Failed to build cookie grabber"
-            Write-Host "Falling back to old COOKIES from secret — rewriting .env"
+            Write-Host "Falling back to old COOKIES from secret - rewriting .env"
             if (-not [string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
               [System.IO.File]::WriteAllText($envPath, $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
             }
@@ -438,7 +438,7 @@ jobs:
           }
           Write-Host "[OK] Grabber built"
 
-          # Run the grabber — it reads PROXY_URL/ALL_PROXY from env (set by proxy step),
+          # Run the grabber - it reads PROXY_URL/ALL_PROXY from env (set by proxy step),
           # connects to Chaturbate through the SOCKS5 tunnel, gets fresh cookies,
           # and writes them to .env.
           Write-Host "Running cookie grabber through proxy..."
@@ -449,7 +449,7 @@ jobs:
           Remove-Item .\grab-cookies.exe -Force -ErrorAction SilentlyContinue
 
           if ($grabExit -ne 0) {
-            Write-Warning "Cookie grabber exited with code $grabExit — falling back to old COOKIES from secret"
+            Write-Warning "Cookie grabber exited with code $grabExit - falling back to old COOKIES from secret"
             if (-not [string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
               [System.IO.File]::WriteAllText($envPath, $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
             }
@@ -461,7 +461,7 @@ jobs:
           if ($envContent -match '^COOKIES=') {
             Write-Host "[OK] Cookies written to .env"
           } else {
-            Write-Warning "COOKIES not found in .env after grabber — falling back"
+            Write-Warning "COOKIES not found in .env after grabber - falling back"
             if (-not [string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
               [System.IO.File]::WriteAllText($envPath, $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
             }
@@ -484,7 +484,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
             Write-Warning "Secret 'env' is empty - skipping .env file"
           } else {
-            # Write .env to repo directory (may overwrite fresh cookies — restored below)
+            # Write .env to repo directory (may overwrite fresh cookies - restored below)
             [System.IO.File]::WriteAllText("$repoDir\.env", $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
             Write-Host "[OK] Wrote .env file to $repoDir\.env"
             
@@ -1127,7 +1127,7 @@ jobs:
                   $tunnelUrl = $urlMatch.Value
                   $tunnelUrl | Set-Content -Path $tunnelUrlFile -Force
                   Write-Host "[OK] New tunnel URL: $tunnelUrl"
-                  # URL changed on reconnect — re-report so admin panel stays current
+                  # URL changed on reconnect - re-report so admin panel stays current
                   Report-TunnelUrl $tunnelUrl
                 }
               }
