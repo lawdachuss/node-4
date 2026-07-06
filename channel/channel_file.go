@@ -185,22 +185,22 @@ func (ch *Channel) processPendingFile(pf pendingFile) {
 	// Single-stream file — move to output dir (triggers preview + upload).
 	if _, err := os.Stat(videoPath); err == nil {
 		if ch.Config.Compress {
-			if !pf.skipMinDuration && ch.handleMinDurationAndMerge(videoPath) {
-				return // video was deferred to pending or merged+uploaded
-			}
-			ch.CompressFile(videoPath)
-			return
-		} else if !pf.skipMinDuration && ch.handleMinDurationAndMerge(videoPath) {
-			return // video was deferred to pending or merged+uploaded
-		} else {
-			// Normalize fMP4 timestamps: Stripchat's LL-HLS segments carry
-			// absolute server timestamps (e.g. start at 5044s), making the
-			// file appear hours long.  A fast ffmpeg stream-copy remux resets
-			// the timeline.  If normalization fails, the file proceeds with
-			// its original (possibly inflated) duration.
 			normalized, normErr := normalizeFMP4Timestamps(videoPath)
 			if normErr != nil {
 				ch.Warn("normalize: could not reset timestamps for %s: %v — uploading with original timestamps", filepath.Base(videoPath), normErr)
+			}
+			if !pf.skipMinDuration && ch.handleMinDurationAndMerge(normalized) {
+				return // video was deferred to pending or merged+uploaded
+			}
+			ch.CompressFile(normalized)
+			return
+		} else {
+			normalized, normErr := normalizeFMP4Timestamps(videoPath)
+			if normErr != nil {
+				ch.Warn("normalize: could not reset timestamps for %s: %v — uploading with original timestamps", filepath.Base(videoPath), normErr)
+			}
+			if !pf.skipMinDuration && ch.handleMinDurationAndMerge(normalized) {
+				return // video was deferred to pending or merged+uploaded
 			}
 			ch.MoveToOutputDir(normalized)
 		}
@@ -221,13 +221,17 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string, skipMinDur
 			return
 		}
 		ch.Info("mux: video track missing; preserving audio-only file %s", filepath.Base(audioPath))
-		if !skipMinDuration && ch.handleMinDurationAndMerge(audioPath) {
+		normalized, normErr := normalizeFMP4Timestamps(audioPath)
+		if normErr != nil {
+			ch.Warn("normalize: could not reset timestamps for %s: %v — uploading with original timestamps", filepath.Base(audioPath), normErr)
+		}
+		if !skipMinDuration && ch.handleMinDurationAndMerge(normalized) {
 			return
 		}
 		if ch.Config.Compress {
-			ch.CompressFile(audioPath)
+			ch.CompressFile(normalized)
 		} else {
-			ch.MoveToOutputDir(audioPath)
+			ch.MoveToOutputDir(normalized)
 		}
 		return
 	case audioInfo == nil:
@@ -237,13 +241,17 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string, skipMinDur
 			return
 		}
 		ch.Info("mux: audio track missing; preserving video-only file %s", filepath.Base(videoPath))
-		if !skipMinDuration && ch.handleMinDurationAndMerge(videoPath) {
+		normalized, normErr := normalizeFMP4Timestamps(videoPath)
+		if normErr != nil {
+			ch.Warn("normalize: could not reset timestamps for %s: %v — uploading with original timestamps", filepath.Base(videoPath), normErr)
+		}
+		if !skipMinDuration && ch.handleMinDurationAndMerge(normalized) {
 			return
 		}
 		if ch.Config.Compress {
-			ch.CompressFile(videoPath)
+			ch.CompressFile(normalized)
 		} else {
-			ch.MoveToOutputDir(videoPath)
+			ch.MoveToOutputDir(normalized)
 		}
 		return
 	}
@@ -275,20 +283,23 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string, skipMinDur
 	ch.Info("delete: removed sidecar %s", filepath.Base(audioPath))
 
 	if ch.Config.Compress {
-		if !skipMinDuration && ch.handleMinDurationAndMerge(finalOutput) {
-			return // video was deferred to pending or merged+uploaded
-		}
-		ch.CompressFile(finalOutput)
-	} else if !skipMinDuration && ch.handleMinDurationAndMerge(finalOutput) {
-		return // video was deferred to pending or merged+uploaded
-	} else {
-		// The muxed output was created with -copyts, which preserves the
-		// original fMP4 absolute timestamps (e.g. PTS=5044s).  Normalize
-		// so the file plays correctly from the start.
-		if _, normErr := normalizeFMP4Timestamps(finalOutput); normErr != nil {
+		normalized, normErr := normalizeFMP4Timestamps(finalOutput)
+		if normErr != nil {
 			ch.Warn("normalize: could not reset timestamps on muxed output %s: %v — uploading with original timestamps", filepath.Base(finalOutput), normErr)
 		}
-		ch.MoveToOutputDir(finalOutput)
+		if !skipMinDuration && ch.handleMinDurationAndMerge(normalized) {
+			return // video was deferred to pending or merged+uploaded
+		}
+		ch.CompressFile(normalized)
+	} else {
+		normalized, normErr := normalizeFMP4Timestamps(finalOutput)
+		if normErr != nil {
+			ch.Warn("normalize: could not reset timestamps on muxed output %s: %v — uploading with original timestamps", filepath.Base(finalOutput), normErr)
+		}
+		if !skipMinDuration && ch.handleMinDurationAndMerge(normalized) {
+			return // video was deferred to pending or merged+uploaded
+		}
+		ch.MoveToOutputDir(normalized)
 	}
 }
 
