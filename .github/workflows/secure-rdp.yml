@@ -664,12 +664,8 @@ jobs:
           
           # Add output redirection to wrapper script for debugging
           $proxyLabel = if ($proxyUrl) { "Netherlands proxy" } else { "direct connection" }
-          $wrapperLines = @(
-            "# DVR Wrapper Script - Sets proxy environment variables before starting DVR",
-            "`$logFile = `"$repoDir\dvr-wrapper.log`"",
-            "Start-Transcript -Path `$logFile -Append",
-            "",
-            if ($proxyUrl) {
+          if ($proxyUrl) {
+            $proxyLines = @(
               "`$env:ALL_PROXY = `"$proxyUrl`"",
               "`$env:all_proxy = `"$proxyUrl`"",
               "# NOTE: Do NOT set HTTP_PROXY/HTTPS_PROXY to a SOCKS5 URL!",
@@ -680,13 +676,22 @@ jobs:
               "# PROXY_URL is already set at workflow level with comma-separated list",
               "# for automatic rotation. Only set if not already present.",
               "if (-not `$env:PROXY_URL) { `$env:PROXY_URL = `"$proxyUrl`" }",
-              "if (-not `$env:PROXY_SERVER) { `$env:PROXY_SERVER = `"$proxyUrl`" }",
-            } else {
+              "if (-not `$env:PROXY_SERVER) { `$env:PROXY_SERVER = `"$proxyUrl`" }"
+            )
+          } else {
+            $proxyLines = @(
               "# No proxy configured - DVR will connect directly",
               "Remove-Item Env:PROXY_URL -ErrorAction SilentlyContinue",
               "Remove-Item Env:ALL_PROXY -ErrorAction SilentlyContinue",
-              "Remove-Item Env:SOCKS_PROXY -ErrorAction SilentlyContinue",
-            },
+              "Remove-Item Env:SOCKS_PROXY -ErrorAction SilentlyContinue"
+            )
+          }
+          $wrapperLines = @(
+            "# DVR Wrapper Script - Sets proxy environment variables before starting DVR",
+            "`$logFile = `"$repoDir\dvr-wrapper.log`"",
+            "Start-Transcript -Path `$logFile -Append",
+            ""
+          ) + $proxyLines + @(
             "# Pooled mode env vars (distributed shards)",
             "`$env:CHANNEL_POOL_MODE = `"${{ secrets.CHANNEL_POOL_MODE }}`"",
             "`$env:NODE_ID = `"${{ secrets.NODE_ID }}`"",
