@@ -1205,11 +1205,14 @@ jobs:
           # ====== DUMP WORKFLOW SETUP LOGS ======
           Write-Host "Saving workflow setup logs for /api/logs..."
           $setupLog = "$repoDir\workflow-setup.log"
-          gh run view $env:GITHUB_RUN_ID --log --repo $env:GITHUB_REPOSITORY 2>$null | ForEach-Object {
-            # Strip ANSI codes and timestamps for cleaner display
-            $_ -replace '\x1b\[[0-9;]*m', '' -replace '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\s+', ''
-          } | Set-Content -Path $setupLog -Force
-          Write-Host "[OK] Workflow setup logs saved ($((Get-Item $setupLog).Length) bytes)"
+          try {
+            gh run view $env:GITHUB_RUN_ID --log --repo $env:GITHUB_REPOSITORY 2>$null | ForEach-Object {
+              $_ -replace '\x1b\[[0-9;]*m', '' -replace '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\s+', ''
+            } | Set-Content -Path $setupLog -Force
+            Write-Host "[OK] Workflow setup logs saved ($((Get-Item $setupLog).Length) bytes)"
+          } catch {
+            Write-Host "[WARN] Could not dump workflow logs: $_"
+          }
 
           # ====== KEEP-ALIVE LOOP ======
           # Clear any stale flag from a previous session before we start
