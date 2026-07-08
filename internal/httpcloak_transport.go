@@ -153,27 +153,26 @@ func (t *httpcloakTransport) refreshProxies() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Always try dynamic discovery first when refreshing after failures.
-	// Clear the stale cache so we get fresh proxies from public lists.
-	fmt.Println("[proxy] all proxies failed — attempting dynamic discovery...")
-	proxy.ResetCache()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	results, err := proxy.FetchProxies(ctx, 5)
-
-	var newProxies []string
-	if err == nil {
-		for _, r := range results {
-			if r.OK {
-				newProxies = append(newProxies, r.URL)
+	// Try configured proxies first — cookies were extracted through them,
+	// so the IP/region must match or Cloudflare rejects the requests.
+	newProxies := configuredProxyURLs()
+	if len(newProxies) > 0 {
+		fmt.Printf("[proxy] using %d env-configured proxies\n", len(newProxies))
+	} else {
+		// No configured proxies — try dynamic discovery as a last resort.
+		fmt.Println("[proxy] no env-configured proxies — attempting dynamic discovery...")
+		proxy.ResetCache()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		results, err := proxy.FetchProxies(ctx, 5)
+		if err == nil {
+			for _, r := range results {
+				if r.OK {
+					newProxies = append(newProxies, r.URL)
+				}
 			}
+			fmt.Printf("[proxy] dynamically discovered %d proxies\n", len(newProxies))
 		}
-		fmt.Printf("[proxy] dynamically discovered %d proxies\n", len(newProxies))
-	}
-
-	// If dynamic discovery found nothing, fall back to configured proxies
-	if len(newProxies) == 0 {
-		newProxies = configuredProxyURLs()
 		if len(newProxies) == 0 {
 			if err != nil {
 				fmt.Printf("[proxy] dynamic discovery failed: %v\n", err)
@@ -182,7 +181,6 @@ func (t *httpcloakTransport) refreshProxies() bool {
 			}
 			return false
 		}
-		fmt.Printf("[proxy] falling back to %d env-configured proxies\n", len(newProxies))
 	}
 
 	// Close old client if it exposes a Close method

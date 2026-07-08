@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/teacat/chaturbate-dvr/channel"
 	"github.com/teacat/chaturbate-dvr/config"
 	"github.com/teacat/chaturbate-dvr/coordinator"
@@ -80,6 +82,22 @@ func loadDotEnv(path string) {
 		v = strings.Trim(v, `"'`)
 		if os.Getenv(k) == "" {
 			os.Setenv(k, v)
+		}
+	}
+}
+
+func pipeReader(r io.ReadCloser, buf *server.LogBuffer, orig io.WriteCloser) {
+	br := bufio.NewReaderSize(r, 4096)
+	for {
+		chunk := make([]byte, 4096)
+		n, err := br.Read(chunk)
+		if n > 0 {
+			data := chunk[:n]
+			orig.Write(data)
+			buf.Write(data)
+		}
+		if err != nil {
+			return
 		}
 	}
 }
@@ -343,6 +361,19 @@ func main() {
 
 func start(c *cli.Context) error {
 	started := time.Now()
+
+	logBuf := server.GetLogBuffer()
+	origStdout, origStderr := os.Stdout, os.Stderr
+	stdoutR, stdoutW, _ := os.Pipe()
+	stderrR, stderrW, _ := os.Pipe()
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+	log.SetOutput(os.Stderr)
+	gin.DefaultWriter = os.Stdout
+	gin.DefaultErrorWriter = os.Stderr
+	go pipeReader(stdoutR, logBuf, origStdout)
+	go pipeReader(stderrR, logBuf, origStderr)
+
 	fmt.Println(logo)
 
 	var err error

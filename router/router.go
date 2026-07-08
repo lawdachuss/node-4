@@ -113,6 +113,9 @@ func SetupViews(r *gin.Engine) {
 	r.POST("/api/pool/remove", RemoveFromPool)
 	r.POST("/api/pool/check", CheckPoolChannel)
 
+	// ── Logs API ─────────────────────────────────────────────────────────
+	r.GET("/api/logs", GetLogs)
+
 }
 
 // LoadHTMLFromEmbedFS loads specific HTML templates from an embedded filesystem and registers them with Gin.

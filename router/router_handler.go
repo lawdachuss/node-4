@@ -1623,3 +1623,29 @@ func CheckPoolChannel(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"exists": false})
 }
+
+// GetLogs returns recent application log lines from the in-memory ring buffer.
+func GetLogs(c *gin.Context) {
+	linesParam := c.DefaultQuery("lines", "100")
+	n, err := strconv.Atoi(linesParam)
+	if err != nil || n < 1 {
+		n = 100
+	}
+	if n > 5000 {
+		n = 5000
+	}
+
+	entries := server.GetLogBuffer().Lines(n)
+	type logLine struct {
+		Time    string `json:"time"`
+		Message string `json:"message"`
+	}
+	result := make([]logLine, len(entries))
+	for i, e := range entries {
+		result[i] = logLine{
+			Time:    e.Time.Format(time.RFC3339),
+			Message: e.Message,
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"logs": result})
+}
