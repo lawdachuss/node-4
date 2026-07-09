@@ -1,4 +1,5 @@
 name: Secure RDP
+run-name: Secure RDP${{ github.event.client_payload.triggered_by == 'workflow-watchman' && ' (watchman)' || '' }}
 
 on:
   schedule:
