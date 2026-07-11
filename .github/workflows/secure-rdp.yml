@@ -174,23 +174,22 @@ jobs:
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
           echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
-      - name: Install Tailscale & FFmpeg (parallel)
+      - name: Install Tailscale
         shell: powershell
         run: |
-          $j1 = Start-Job -ScriptBlock {
-            $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"; $i = "$env:TEMP\tailscale.msi"
-            Invoke-WebRequest -Uri $url -OutFile $i -UseBasicParsing
-            Start-Process msiexec.exe -ArgumentList "/i `"$i`" /qn /norestart" -Wait; Remove-Item $i -Force
-          }
-          $j2 = Start-Job -ScriptBlock {
-            $s = $env:ALL_PROXY; Remove-Item Env:ALL_PROXY,Env:all_proxy,Env:HTTP_PROXY,Env:HTTPS_PROXY,Env:http_proxy,Env:https_proxy -ErrorAction SilentlyContinue
-            $env:NO_PROXY = "community.chocolatey.org,chocolatey.org"
-            choco install ffmpeg -y --no-progress 2>&1 | Out-Null
-            if ($s) { $env:ALL_PROXY = $s; $env:all_proxy = $s }
-          }
-          $null = $j1, $j2 | Wait-Job -Timeout 120 -ErrorAction SilentlyContinue
-          Receive-Job $j1, $j2 -ErrorAction SilentlyContinue | Out-Null
-          Remove-Job $j1, $j2 -Force -ErrorAction SilentlyContinue
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          $i = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $url -OutFile $i -UseBasicParsing -TimeoutSec 60
+          Start-Process msiexec.exe -ArgumentList "/i `"$i`" /qn /norestart" -Wait
+          Remove-Item $i -Force
+
+      - name: Install FFmpeg
+        shell: powershell
+        run: |
+          $s = $env:ALL_PROXY; Remove-Item Env:ALL_PROXY,Env:all_proxy,Env:HTTP_PROXY,Env:HTTPS_PROXY,Env:http_proxy,Env:https_proxy -ErrorAction SilentlyContinue
+          $env:NO_PROXY = "community.chocolatey.org,chocolatey.org"
+          choco install ffmpeg -y --no-progress 2>&1
+          if ($s) { $env:ALL_PROXY = $s; $env:all_proxy = $s }
           $ffver = & ffmpeg.exe -version 2>&1; Write-Host "FFmpeg: $($ffver | Select-Object -First 1)"
 
       - name: Check & Connect Tailscale
@@ -239,23 +238,19 @@ jobs:
             if ($sa) { $env:ALL_PROXY = $sa; $env:all_proxy = $sa }
           }
 
-          # Build grab_cookies (synchronous - Go needs PATH from setup-go)
+          # Build both binaries (synchronous - Go needs PATH from setup-go)
           Set-Location $repoDir
           $sa = $env:ALL_PROXY; Remove-Item Env:ALL_PROXY,Env:all_proxy,Env:HTTP_PROXY,Env:HTTPS_PROXY,Env:http_proxy,Env:https_proxy -ErrorAction SilentlyContinue
           $env:GOPROXY = "https://proxy.golang.org,direct"
           go build -o grab-cookies.exe ./cmd/grab_cookies 2>&1
+          go build -o chaturbate-dvr.exe . 2>&1
           $buildExit = $LASTEXITCODE
           if ($sa) { $env:ALL_PROXY = $sa; $env:all_proxy = $sa }
-          if ($buildExit -ne 0) { Write-Warning "grab-cookies build failed (exit $buildExit)" }
+          if ($buildExit -ne 0) { Write-Error "Build failed (exit $buildExit)"; exit 1 }
 
           # Wait for Scrapling
           $null = $scrapleJob | Wait-Job -Timeout 180 -ErrorAction SilentlyContinue
           Receive-Job $scrapleJob -ErrorAction SilentlyContinue; Remove-Job $scrapleJob -Force -ErrorAction SilentlyContinue
-
-          # Verify DVR binary
-          $dvrExe = "$repoDir\chaturbate-dvr.exe"
-          if (-not (Test-Path $dvrExe)) { Write-Error "DVR binary not found"; exit 1 }
-          $v = & $dvrExe --version 2>&1; Write-Host "DVR: $v"
 
       - name: Write .env, Run Setup, Refresh Cookies
         shell: powershell
