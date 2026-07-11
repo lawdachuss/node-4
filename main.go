@@ -214,7 +214,7 @@ func main() {
 			&cli.BoolFlag{
 				Name:  "compress",
 				Usage: "Compress recorded files (.ts or .mp4) to .mkv using ffmpeg after recording",
-				Value: true,
+				Value: false,
 			},
 			&cli.StringFlag{
 				Name:    "output-dir",

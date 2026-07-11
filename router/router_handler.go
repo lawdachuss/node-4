@@ -338,7 +338,7 @@ func CreateChannel(c *gin.Context) {
 			Pattern:                 req.Pattern,
 			MaxDuration:             req.MaxDuration,
 			MaxFilesize:             req.MaxFilesize,
-			Compress:                req.Compress,
+			Compress:                false,
 			MinDurationBeforeUpload: req.MinDurationBeforeUpload,
 			CreatedAt:               time.Now().Unix(),
 		}, true); err != nil {
