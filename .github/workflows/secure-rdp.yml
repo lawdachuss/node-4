@@ -65,6 +65,10 @@ jobs:
           UPNSHARE_KEY: ${{ secrets.UPNSHARE_KEY }}
           DOODSTREAM_API_KEY: ${{ secrets.DOODSTREAM_API_KEY }}
           VOESX_API_KEY: ${{ secrets.VOESX_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
         run: |
           $repoDir = "D:\repos\node-3"
           $proxyFile = "$env:TEMP\_proxy"
@@ -315,6 +319,26 @@ jobs:
               Write-Host "[.env] Final: $((Get-Item "$repoDir\.env").Length) bytes, cookies preserved"
             }
           } else { Write-Warning "[.env] No fresh cookies - DVR will use secret fallback" }
+
+          # Append Supabase credentials from secrets into .env so the DVR
+          # (launched as a SYSTEM scheduled task) can read them from the file.
+          # The .env is written from MINI_ENV above; these lines are merged in
+          # without disturbing cookies / upload keys already present.
+          if (-not [string]::IsNullOrWhiteSpace($env:SUPABASE_URL)) {
+            $sb = Get-Content "$repoDir\.env" -Raw -ErrorAction SilentlyContinue
+            if ($sb -eq $null) { $sb = "" }
+            function SetOrAdd($key, $val) {
+              param($k, $v)
+              if ($sb -match "(?m)^$k=") { $script:sb = $sb -replace "(?m)^$k=.*`$", "$k=$v" }
+              else { $script:sb = $sb.TrimEnd("`r","`n") + "`n$k=$v`n" }
+            }
+            SetOrAdd "SUPABASE_URL" $env:SUPABASE_URL
+            SetOrAdd "SUPABASE_API_KEY" $env:SUPABASE_API_KEY
+            SetOrAdd "SUPABASE_SERVICE_ROLE_KEY" $env:SUPABASE_SERVICE_ROLE_KEY
+            SetOrAdd "DATABASE_PASSWORD" $env:DATABASE_PASSWORD
+            [System.IO.File]::WriteAllText("$repoDir\.env", $sb, (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host "[.env] Supabase vars merged (SUPABASE_URL present: $(if($sb -match 'SUPABASE_URL='){'yes'}else{'no'}))"
+          } else { Write-Warning "[.env] SUPABASE_URL secret empty - skipping Supabase merge" }
 
           # Capture proxy for child jobs (starts after proxy is resolved)
           $mAllProxy = $env:ALL_PROXY
