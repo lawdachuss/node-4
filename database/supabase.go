@@ -150,6 +150,13 @@ func (c *Client) get(path string, result interface{}) error {
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
+// Get performs a GET against the Supabase REST API and decodes the JSON
+// response into result. Exported so callers outside the package (e.g. CLI
+// commands) can run ad-hoc queries.
+func (c *Client) Get(path string, result interface{}) error {
+	return c.get(path, result)
+}
+
 func (c *Client) post(path string, body interface{}, result interface{}) error {
 	resp, err := c.requestWithRetry("POST", path, body)
 	if err != nil {
@@ -694,6 +701,36 @@ func (c *Client) GetAllPreviewImages() ([]PreviewImage, error) {
 		offset += pageSize
 	}
 	return all, nil
+}
+
+// ClearPreviewURLs blanks out the preview_url column so the UI stops showing
+// stale/slow previews.  When before is non-empty it is treated as an ISO-8601
+// timestamp and only rows with an older timestamp are affected — this lets you
+// target only previews generated before a code fix.  When before is empty ALL
+// preview URLs are cleared.  Applies to both the preview_images and recordings
+// tables.
+func (c *Client) ClearPreviewURLs(before string) error {
+	// preview_images table (filtered by uploaded_at)
+	piPath := "/preview_images?preview_url=not.is.null"
+	if before != "" {
+		piPath += fmt.Sprintf("&uploaded_at=lt.%s", url.QueryEscape(before))
+	}
+	piBody := []map[string]interface{}{{ "preview_url": "" }}
+	if _, e := c.requestWithRetry("PATCH", piPath, piBody); e != nil {
+		return fmt.Errorf("clear preview_images: %w", e)
+	}
+
+	// recordings table (filtered by timestamp)
+	recPath := "/recordings?preview_url=not.is.null"
+	if before != "" {
+		recPath += fmt.Sprintf("&timestamp=lt.%s", url.QueryEscape(before))
+	}
+	recBody := []map[string]interface{}{{ "preview_url": "" }}
+	if _, e := c.requestWithRetry("PATCH", recPath, recBody); e != nil {
+		return fmt.Errorf("clear recordings: %w", e)
+	}
+
+	return nil
 }
 
 // ============================================================================

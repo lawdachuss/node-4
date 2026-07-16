@@ -358,11 +358,102 @@ func main() {
 				Value:   "",
 			},
 		},
+		Commands: []*cli.Command{
+			{
+				Name:  "clean-previews",
+				Usage: "Clear slow/stale preview URLs from Supabase (preview_images + recordings)",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "supabase-url",
+						Usage:   "Supabase project URL",
+						EnvVars: []string{"SUPABASE_URL"},
+					},
+					&cli.StringFlag{
+						Name:    "supabase-api-key",
+						Usage:   "Supabase anon/public API key",
+						EnvVars: []string{"SUPABASE_API_KEY"},
+					},
+					&cli.IntFlag{
+						Name:  "days",
+						Usage: "Only clear previews uploaded within the last N days (default 2)",
+						Value: 2,
+					},
+					&cli.BoolFlag{
+						Name:  "all",
+						Usage: "Clear ALL preview URLs regardless of age (ignores --days)",
+					},
+					&cli.BoolFlag{
+						Name:  "dry-run",
+						Usage: "Show how many rows match without actually clearing them",
+					},
+				},
+				Action: cleanPreviews,
+			},
+		},
 		Action: start,
 	}
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// cleanPreviews clears preview URLs from Supabase for recent (or all) rows.
+func cleanPreviews(c *cli.Context) error {
+	url := c.String("supabase-url")
+	key := c.String("supabase-api-key")
+	if url == "" || key == "" {
+		return fmt.Errorf("SUPABASE_URL and SUPABASE_API_KEY must be set (env or flags)")
+	}
+
+	client := database.NewClient(url, key)
+
+	var before string
+	if !c.Bool("all") {
+		before = time.Now().AddDate(0, 0, -c.Int("days")).UTC().Format(time.RFC3339)
+	}
+
+	if c.Bool("dry-run") {
+		piCount, err := countPreviewImages(client, before)
+		if err != nil {
+			return fmt.Errorf("count preview_images: %w", err)
+		}
+		recCount, err := countRecordings(client, before)
+		if err != nil {
+			return fmt.Errorf("count recordings: %w", err)
+		}
+		fmt.Printf("[dry-run] Would clear %d preview_images rows and %d recordings rows (before=%s)\n", piCount, recCount, before)
+		return nil
+	}
+
+	if err := client.ClearPreviewURLs(before); err != nil {
+		return err
+	}
+	fmt.Printf("Cleared preview URLs (before=%s) from preview_images + recordings tables.\n", before)
+	return nil
+}
+
+func countPreviewImages(client *database.Client, before string) (int, error) {
+	path := "/preview_images?preview_url=not.is.null&select=filename"
+	if before != "" {
+		path += fmt.Sprintf("&uploaded_at=lt.%s", url.QueryEscape(before))
+	}
+	var rows []map[string]interface{}
+	if err := client.Get(path, &rows); err != nil {
+		return 0, err
+	}
+	return len(rows), nil
+}
+
+func countRecordings(client *database.Client, before string) (int, error) {
+	path := "/recordings?preview_url=not.is.null&select=filename"
+	if before != "" {
+		path += fmt.Sprintf("&timestamp=lt.%s", url.QueryEscape(before))
+	}
+	var rows []map[string]interface{}
+	if err := client.Get(path, &rows); err != nil {
+		return 0, err
+	}
+	return len(rows), nil
 }
 
 func start(c *cli.Context) error {

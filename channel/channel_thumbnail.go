@@ -433,7 +433,8 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					"-ss", "0",
 					"-i", videoPath,
 					"-t", fmt.Sprintf("%.2f", previewDuration),
-					"-vf", fmt.Sprintf("scale=%d:-2:flags=lanczos", previewWidth),
+					"-vf", fmt.Sprintf("scale=%d:-2:flags=lanczos,fps=30", previewWidth),
+					"-r", "30",
 					"-c:v", "libx264",
 					"-preset", "fast",
 					"-crf", "23",
@@ -445,7 +446,8 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 				stderr, err = runFFmpeg(ctx,
 					"-y",
 					"-i", videoPath,
-					"-vf", fmt.Sprintf("scale=%d:-2:flags=lanczos", previewWidth),
+					"-vf", fmt.Sprintf("scale=%d:-2:flags=lanczos,fps=30", previewWidth),
+					"-r", "30",
 					"-c:v", "libx264",
 					"-preset", "fast",
 					"-crf", "23",
@@ -494,7 +496,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					}
 					label := fmt.Sprintf("v%d", i)
 					filterParts = append(filterParts, fmt.Sprintf(
-						"[0:v]trim=start=%.3f:duration=%.3f,setpts=PTS-STARTPTS[%s]",
+						"[0:v]trim=start=%.3f:duration=%.3f,setpts=PTS-STARTPTS,fps=30[%s]",
 						ptsOffset+start, segDuration, label,
 					))
 					concatInputs = append(concatInputs, fmt.Sprintf("[%s]", label))
@@ -508,11 +510,12 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					fmt.Sprintf("concat=n=%d:v=1:a=0,scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos,pad=%d:%d:(ow-iw)/2:(oh-ih)/2[out]",
 						previewSegments, previewWidth, previewHeight, previewWidth, previewHeight)
 
-				stderr, err = runFFmpeg(ctx,
+					stderr, err = runFFmpeg(ctx,
 					"-y",
 					"-i", videoPath,
 					"-filter_complex", filterComplex,
 					"-map", "[out]",
+					"-r", "30",
 					"-c:v", "libx264",
 					"-preset", "fast",
 					"-crf", "23",
@@ -534,7 +537,8 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 						"-ss", fmt.Sprintf("%.2f", ptsOffset+dur*0.3),
 						"-i", videoPath,
 						"-t", fmt.Sprintf("%.2f", previewDuration),
-						"-vf", fmt.Sprintf("scale=%d:-2:flags=lanczos", previewWidth),
+						"-vf", fmt.Sprintf("scale=%d:-2:flags=lanczos,fps=30", previewWidth),
+						"-r", "30",
 						"-c:v", "libx264",
 						"-preset", "fast",
 						"-crf", "23",
