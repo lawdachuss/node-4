@@ -595,7 +595,7 @@ jobs:
             $sleepSecs = [Math]::Min($targetDuration - $elapsed, 60)
             if ($sleepSecs -le 0) { break }
             if ($dvr.HasExited) {
-              Write-Host "[WARN] DVR exited (code: $($dvr.ExitCode)) - restarting..."
+              Write-Host "[WARN] DVR exited (code: $($dvr.ExitCode)) - restarting..."; $null = [System.Console]::Out.Flush()
               # NOTE: in PowerShell, `number + "string"` is NUMERIC addition (it
               # coerces the string to a number), not concatenation — so
               # `... + "m0s"` throws "Cannot convert value 'm0s' to System.Int32".
@@ -604,16 +604,16 @@ jobs:
               $dvr = Start-Process -FilePath $dvrExe -ArgumentList "--no-tunnel --output-dir `"$videosDir`"" -WorkingDirectory $repoDir -NoNewWindow -RedirectStandardOutput $dvrLog -RedirectStandardError "$repoDir\dvr-err.log" -PassThru
             }
             if ($tun -and $tun.HasExited) {
-              Write-Host "[WARN] Tunnel exited - restarting..."
+              Write-Host "[WARN] Tunnel exited - restarting..."; $null = [System.Console]::Out.Flush()
               $stderr = "$repoDir\tunnel-stderr.log"; if (Test-Path $stderr) { Remove-Item $stderr -Force }
               $tun = Start-Process -FilePath $cloudflaredPath -ArgumentList "tunnel --url http://localhost:8080 --protocol http2" -WorkingDirectory $repoDir -NoNewWindow -RedirectStandardError $stderr -PassThru
               Start-Sleep -Seconds 10
-              if (Test-Path $stderr) { $c = Get-Content $stderr -Raw; $m = [regex]::Match($c, 'https://[a-z0-9\-]+\.trycloudflare\.com'); if ($m.Success) { $tunnelUrl = $m.Value; $tunnelUrl | Set-Content $tunnelUrlFile -Force; $cachedShortUrl = Shorten-Url $tunnelUrl; $lastTunnelUrl = $tunnelUrl; if ($cachedShortUrl) { Write-Host "[OK] Dashboard restarted: $cachedShortUrl" } else { Write-Host "[OK] Tunnel restarted - download artifact for link" }; Update-NodeWebUrl $myNodeId "$tunnelUrl" } }
+              if (Test-Path $stderr) { $c = Get-Content $stderr -Raw; $m = [regex]::Match($c, 'https://[a-z0-9\-]+\.trycloudflare\.com'); if ($m.Success) { $tunnelUrl = $m.Value; $tunnelUrl | Set-Content $tunnelUrlFile -Force; $cachedShortUrl = Shorten-Url $tunnelUrl; $lastTunnelUrl = $tunnelUrl; if ($cachedShortUrl) { Write-Host "[OK] Dashboard restarted: $cachedShortUrl"; $null = [System.Console]::Out.Flush() } else { Write-Host "[OK] Tunnel restarted - download artifact for link"; $null = [System.Console]::Out.Flush() }; Update-NodeWebUrl $myNodeId "$tunnelUrl" } }
             }
             if ($tunnelUrl -and $tunnelUrl -ne $lastTunnelUrl) { $cachedShortUrl = Shorten-Url $tunnelUrl; $lastTunnelUrl = $tunnelUrl }
             $pub = if ($cachedShortUrl) { " | $cachedShortUrl" } elseif ($tunnelUrl) { " | $tunnelUrl" } else { "" }
             $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-            Write-Host "[$now] $tsIp$pub (Elapsed: $([Math]::Round($elapsed/60,1))m)"
+            Write-Host "[$now] $tsIp$pub (Elapsed: $([Math]::Round($elapsed/60,1))m)"; $null = [System.Console]::Out.Flush()
             Start-Sleep -Seconds $sleepSecs
           }
           $waitStart = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
