@@ -240,4 +240,7 @@ type Config struct {
 	// Distributed shards/nodes configuration
 	NodeID          string // unique node identifier (auto-detected if empty)
 	ChannelPoolMode string // "isolated" (default) or "pooled"
+
+	QuarantineEnabled   bool   `json:"quarantine_enabled"`
+	NormalizeMaxRetries int    `json:"normalize_max_retries"`
 }

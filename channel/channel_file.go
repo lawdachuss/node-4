@@ -189,7 +189,7 @@ func (ch *Channel) processPendingFile(pf pendingFile) {
 	// Single-stream file — move to output dir (triggers preview + upload).
 	if _, err := os.Stat(videoPath); err == nil {
 		if ch.Config.Compress {
-			normalized, normErr := normalizeFMP4Timestamps(videoPath, func(msg string) { ch.Info("normalize: %s", msg) })
+			normalized, normErr := ch.normalizeFMP4TimestampsWithRetry(videoPath)
 			if normErr != nil {
 				ch.Warn("normalize: could not reset timestamps for %s: %v — uploading with original timestamps", filepath.Base(videoPath), normErr)
 			}
@@ -199,7 +199,7 @@ func (ch *Channel) processPendingFile(pf pendingFile) {
 			ch.CompressFile(normalized)
 			return
 		} else {
-			normalized, normErr := normalizeFMP4Timestamps(videoPath, func(msg string) { ch.Info("normalize: %s", msg) })
+			normalized, normErr := ch.normalizeFMP4TimestampsWithRetry(videoPath)
 			if normErr != nil {
 				ch.Warn("normalize: could not reset timestamps for %s: %v — uploading with original timestamps", filepath.Base(videoPath), normErr)
 			}
@@ -225,7 +225,7 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string, skipMinDur
 			return
 		}
 		ch.Info("mux: video track missing; preserving audio-only file %s", filepath.Base(audioPath))
-		normalized, normErr := normalizeFMP4Timestamps(audioPath, func(msg string) { ch.Info("normalize: %s", msg) })
+		normalized, normErr := ch.normalizeFMP4TimestampsWithRetry(audioPath)
 		if normErr != nil {
 			ch.Warn("normalize: could not reset timestamps for %s: %v — uploading with original timestamps", filepath.Base(audioPath), normErr)
 		}
@@ -245,7 +245,7 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string, skipMinDur
 			return
 		}
 		ch.Info("mux: audio track missing; preserving video-only file %s", filepath.Base(videoPath))
-		normalized, normErr := normalizeFMP4Timestamps(videoPath, func(msg string) { ch.Info("normalize: %s", msg) })
+		normalized, normErr := ch.normalizeFMP4TimestampsWithRetry(videoPath)
 		if normErr != nil {
 			ch.Warn("normalize: could not reset timestamps for %s: %v — uploading with original timestamps", filepath.Base(videoPath), normErr)
 		}
@@ -287,7 +287,7 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string, skipMinDur
 	ch.Info("delete: removed sidecar %s", filepath.Base(audioPath))
 
 	if ch.Config.Compress {
-		normalized, normErr := normalizeFMP4Timestamps(finalOutput, func(msg string) { ch.Info("normalize: %s", msg) })
+		normalized, normErr := ch.normalizeFMP4TimestampsWithRetry(finalOutput)
 		if normErr != nil {
 			ch.Warn("normalize: could not reset timestamps on muxed output %s: %v — uploading with original timestamps", filepath.Base(finalOutput), normErr)
 		}
@@ -296,7 +296,7 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string, skipMinDur
 		}
 		ch.CompressFile(normalized)
 	} else {
-		normalized, normErr := normalizeFMP4Timestamps(finalOutput, func(msg string) { ch.Info("normalize: %s", msg) })
+		normalized, normErr := ch.normalizeFMP4TimestampsWithRetry(finalOutput)
 		if normErr != nil {
 			ch.Warn("normalize: could not reset timestamps on muxed output %s: %v — uploading with original timestamps", filepath.Base(finalOutput), normErr)
 		}
@@ -723,7 +723,7 @@ func moveToPendingDir(filePath, username string) error {
 		return fmt.Errorf("create pending dir: %w", err)
 	}
 	dest := uniqueDestPath(filepath.Join(pendingDir, filepath.Base(filePath)))
-	return os.Rename(filePath, dest)
+	return moveFile(filePath, dest)
 }
 
 // DeleteSidecarFiles removes raw A/V track sidecar files associated with a
@@ -1523,15 +1523,23 @@ func (ch *Channel) handleMinDurationAndMerge(videoPath string, skipDefer bool) b
 		pendingDir := pendingSegmentsDir(ch.Config.Username)
 		if mErr := os.MkdirAll(pendingDir, 0777); mErr == nil {
 			destPath := uniqueDestPath(filepath.Join(pendingDir, filepath.Base(videoPath)))
-			if rErr := os.Rename(videoPath, destPath); rErr == nil {
+			if rErr := moveFile(videoPath, destPath); rErr == nil {
 				mu.Unlock()
 				return true
 			}
 		}
-		// Cannot defer and must not upload a sub-threshold/corrupt file, so drop it.
+		// Cannot defer and must not upload a sub-threshold/corrupt file.
 		mu.Unlock()
-		ch.Error("min-duration: probe failed and cannot defer %s — dropping (no upload)", filepath.Base(videoPath))
-		os.Remove(videoPath)
+		if server.Config == nil || server.Config.QuarantineEnabled {
+			ch.Error("min-duration: probe failed and cannot defer %s — moving to quarantine", filepath.Base(videoPath))
+			reason := fmt.Sprintf("Probe failed: %v.\n%s\nCould not defer to pending.", err, analyzeFFmpegError(err, videoPath))
+			if qErr := ch.quarantineFile(videoPath, reason); qErr != nil {
+				ch.Error("min-duration: quarantine failed: %v — file will remain in place", qErr)
+			}
+		} else {
+			ch.Error("min-duration: probe failed and cannot defer %s — dropping (no upload)", filepath.Base(videoPath))
+			os.Remove(videoPath)
+		}
 		return true
 	}
 
@@ -1677,7 +1685,7 @@ func (ch *Channel) handleMinDurationAndMerge(videoPath string, skipDefer bool) b
 	}
 
 	destPath := uniqueDestPath(filepath.Join(pendingDir, filepath.Base(videoPath)))
-	if err := os.Rename(videoPath, destPath); err != nil {
+	if err := moveFile(videoPath, destPath); err != nil {
 		mu.Unlock()
 		// Cannot defer, so drop rather than let it fall through to upload.
 		ch.Error("min-duration: cannot move %s to pending: %v — dropping short video (no upload)", filepath.Base(videoPath), err)
@@ -1840,4 +1848,111 @@ func (ch *Channel) ShouldSwitchFile() bool {
 
 	return (dur >= float64(maxDurationSeconds) && ch.Config.MaxDuration > 0) ||
 		(fsize >= maxFilesizeBytes && ch.Config.MaxFilesize > 0)
+}
+
+func (ch *Channel) quarantineFile(videoPath string, reason string) error {
+	dir := "videos"
+	if server.Config != nil && server.Config.OutputDir != "" {
+		dir = server.Config.OutputDir
+	}
+	quarantineDir := filepath.Join(dir, "quarantine", ch.Config.Username)
+	if err := os.MkdirAll(quarantineDir, 0777); err != nil {
+		return fmt.Errorf("create quarantine dir: %w", err)
+	}
+
+	base := filepath.Base(videoPath)
+	timestamp := time.Now().Format("20060102_150405")
+	quarantinePath := filepath.Join(quarantineDir, fmt.Sprintf("%s_%s", timestamp, base))
+
+	// Write a .txt file with the reason
+	reasonFile := quarantinePath + ".reason.txt"
+	_ = os.WriteFile(reasonFile, []byte(reason), 0644)
+
+	// Move the file to quarantine using moveFile
+	if err := moveFile(videoPath, quarantinePath); err != nil {
+		return fmt.Errorf("move to quarantine: %w", err)
+	}
+
+	ch.Warn("quarantine: moved %s to quarantine (%s)", base, reason)
+	return nil
+}
+
+func (ch *Channel) normalizeFMP4TimestampsWithRetry(videoPath string) (string, error) {
+	maxRetries := 3
+	if server.Config != nil && server.Config.NormalizeMaxRetries > 0 {
+		maxRetries = server.Config.NormalizeMaxRetries
+	}
+
+	var lastErr error
+	warn := func(msg string) { ch.Info("normalize: %s", msg) }
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		result, err := normalizeFMP4Timestamps(videoPath, warn)
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+
+		// Check if this is a transient error
+		if isTransientFFmpegError(err) && attempt < maxRetries {
+			backoff := time.Duration(attempt) * 5 * time.Second
+			ch.Warn("normalize attempt %d/%d failed (transient), retrying in %s: %v",
+				attempt, maxRetries, backoff, err)
+			time.Sleep(backoff)
+			continue
+		}
+
+		// Permanent error - don't retry
+		break
+	}
+
+	return videoPath, fmt.Errorf("normalize failed after %d attempts: %w", maxRetries, lastErr)
+}
+
+func isTransientFFmpegError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Windows exit codes that might be transient
+	transientCodes := []string{
+		"0xbebbb1b7",    // Memory access violation (could be OOM)
+		"exit status 1", // Generic failure (might be temporary)
+	}
+	for _, code := range transientCodes {
+		if strings.Contains(errStr, code) {
+			return true
+		}
+	}
+	return false
+}
+
+func analyzeFFmpegError(err error, videoPath string) string {
+	if err == nil {
+		return ""
+	}
+
+	errStr := err.Error()
+
+	// Windows-specific codes
+	if strings.Contains(errStr, "0xbebbb1b7") {
+		return "FFmpeg crashed (memory access violation). Possible causes:\n" +
+			"  - Corrupted input file\n" +
+			"  - Out of memory\n" +
+			"  - Graphics driver issue\n" +
+			"  - Codec incompatibility"
+	}
+
+	// Check file size
+	if stat, _ := os.Stat(videoPath); stat != nil {
+		if stat.Size() == 0 {
+			return "File is empty (0 bytes)"
+		}
+		if stat.Size() < 1024 {
+			return fmt.Sprintf("File is suspiciously small (%d bytes)", stat.Size())
+		}
+	}
+
+	return fmt.Sprintf("FFmpeg error: %v", err)
 }

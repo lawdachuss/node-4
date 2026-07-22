@@ -273,6 +273,18 @@ func main() {
 				EnvVars: []string{"MIN_DURATION_BEFORE_UPLOAD"},
 				Value:   1200,
 			},
+			&cli.BoolFlag{
+				Name:    "quarantine-enabled",
+				Usage:   "Move corrupted files to quarantine instead of deleting",
+				EnvVars: []string{"QUARANTINE_ENABLED"},
+				Value:   true,
+			},
+			&cli.IntFlag{
+				Name:    "normalize-max-retries",
+				Usage:   "How many times to retry timestamp normalization",
+				EnvVars: []string{"NORMALIZE_MAX_RETRIES"},
+				Value:   3,
+			},
 			&cli.StringFlag{
 				Name:    "voesx-api-key",
 				Usage:   "API key for VOE.sx uploads",

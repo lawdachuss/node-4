@@ -40,6 +40,28 @@ type camResponse struct {
 	} `json:"user"`
 }
 
+func (c *camResponse) UnmarshalJSON(data []byte) error {
+	type Alias camResponse
+	aux := &struct {
+		Cam json.RawMessage `json:"cam"`
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	if len(aux.Cam) > 0 && aux.Cam[0] == '{' {
+		if err := json.Unmarshal(aux.Cam, &c.Cam); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func mapGender(g string) string {
 	switch g {
 	case "female":

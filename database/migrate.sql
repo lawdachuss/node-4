@@ -728,7 +728,10 @@ BEGIN
   RETURN QUERY
   INSERT INTO upload_links (recording_id, host, url, instance_id)
   VALUES (p_recording_id::UUID, p_host, p_url, p_instance_id)
-  ON CONFLICT (recording_id, host) DO UPDATE SET url = EXCLUDED.url, uploaded_at = NOW()
+  ON CONFLICT ON CONSTRAINT upload_links_recording_host_unique
+  DO UPDATE SET 
+    url = EXCLUDED.url, 
+    uploaded_at = NOW()
   RETURNING *;
 END;
 $$;
@@ -750,7 +753,7 @@ BEGIN
   INSERT INTO upload_links (recording_id, host, url, instance_id)
   SELECT recording_id, host, url, instance_id
   FROM link_data
-  ON CONFLICT (recording_id, host) 
+  ON CONFLICT ON CONSTRAINT upload_links_recording_host_unique
   DO UPDATE SET 
     url = EXCLUDED.url, 
     uploaded_at = NOW()

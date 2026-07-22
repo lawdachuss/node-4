@@ -315,6 +315,9 @@ func New(c *cli.Context) (*entity.Config, error) {
 		AffiliateWM:    c.String("affiliate-wm"),
 		CBUsername:     c.String("cb-username"),
 		CBApiToken:     c.String("cb-api-token"),
+
+		QuarantineEnabled:   c.Bool("quarantine-enabled"),
+		NormalizeMaxRetries: c.Int("normalize-max-retries"),
 	}
 
 	// If user provided a custom ffmpeg path, set it globally
