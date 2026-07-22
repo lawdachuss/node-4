@@ -1,0 +1,74 @@
+{
+  "checkedAt": "2026-07-20T18:08:53.359Z",
+  "totalRepos": 11,
+  "running": 10,
+  "idle": 1,
+  "repos": {
+    "node-1": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T12:55:36Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "node-2": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T15:19:32Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "node-3": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T13:25:31Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "node-4": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T12:56:43Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "node-5": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T17:29:30Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "node-6": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T12:56:51Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "node-7": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T12:56:50Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "node-8": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T12:56:54Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "node-9": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T15:45:38Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "node-10": {
+      "status": "in_progress",
+      "lastRun": "2026-07-20T12:57:03Z",
+      "lastConclusion": null,
+      "restarts": 0
+    },
+    "backfill": {
+      "status": "completed",
+      "lastRun": "2026-07-20T18:00:19Z",
+      "lastConclusion": "success",
+      "restarts": 5
+    }
+  }
+}

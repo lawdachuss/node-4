@@ -450,6 +450,15 @@ func (ch *Channel) MoveToOutputDir(srcPath string) string {
 	// sees the file as already claimed by the pipeline.
 	MarkUploadInFlight(destPath)
 	if err := moveFile(srcPath, destPath); err != nil {
+		// If the destination file exists after moveFile failure, the copy
+		// succeeded but the source could not be removed (Windows lock from
+		// AV, Search Indexer, etc.).  Upload from destination — the file
+		// there is complete and not locked.
+		if fi, statErr := os.Stat(destPath); statErr == nil && fi.Size() > 0 {
+			ch.Warn("output-dir: copy to %s succeeded but source %s could not be removed (%v) — uploading from destination", destPath, filepath.Base(srcPath), err)
+			enqueue(destPath)
+			return destPath
+		}
 		ch.Error("output-dir: move %s to %s: %s — uploading from original location (%s)", filepath.Base(srcPath), destDir, err.Error(), resolvePathForLog(srcPath))
 		MarkUploadDone(destPath) // release the failed-dest marker before marking src
 		MarkUploadInFlight(srcPath)
@@ -546,14 +555,18 @@ func moveFile(src, dest string) error {
 	// still open, so defer in.Close() would keep the file busy.
 	in.Close()
 
-	// Retry remove with aggressive backoff (up to ~50s total) so transient
+	// Brief pause after close so an external locker (Defender, Search
+	// Indexer) has a chance to begin its scan before our first remove.
+	time.Sleep(500 * time.Millisecond)
+
+	// Retry remove with aggressive backoff (up to ~130s total) so transient
 	// Windows locks (AV scanner, Search Indexer) have time to release.
 	// If still locked, try rename + delete as a fallback.
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 40; i++ {
 		if err := os.Remove(src); err == nil {
 			return nil
 		}
-		if i >= 10 {
+		if i >= 15 {
 			tmpPath := fmt.Sprintf("%s.deleting.%d", src, i)
 			if renameErr := os.Rename(src, tmpPath); renameErr == nil {
 				if removeErr := os.Remove(tmpPath); removeErr == nil {
@@ -563,8 +576,8 @@ func moveFile(src, dest string) error {
 			}
 		}
 		backoff := time.Duration(100*(1<<uint(min(i, 8)))) * time.Millisecond // 100ms, 200ms, 400ms, … 25.6s
-		if backoff > 5*time.Second {
-			backoff = 5 * time.Second
+		if backoff > 3*time.Second {
+			backoff = 3 * time.Second
 		}
 		time.Sleep(backoff)
 	}

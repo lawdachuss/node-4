@@ -1,0 +1,14 @@
+name = "workflow-watchman"
+main = "watchman-src/index.js"
+compatibility_date = "2025-04-01"
+
+# The GitHub Personal Access Token (classic with `repo` + `workflow` scopes)
+# used to read workflow runs and dispatch new ones.
+# Set via: wrangler secret put GITHUB_TOKEN
+# Or copy .dev.vars.example -> .dev.vars for local dev.
+
+# Optional Discord webhook for restart/error notifications.
+# Set via: wrangler secret put DISCORD_WEBHOOK_URL
+
+[triggers]
+crons = ["*/10 * * * *"]
