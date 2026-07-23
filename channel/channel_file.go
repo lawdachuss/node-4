@@ -769,24 +769,29 @@ func removeFileWithRetry(path string) error {
 
 // normalizeFMP4Timestamps remuxes an fMP4 recording to reset the timeline.
 // Stripchat's LL-HLS segments carry absolute server timestamps (e.g. start at
-// 5044s), which makes the file appear hours long.  A fast stream-copy remux
-// with -movflags +faststart normalises the timestamps and moves the moov atom
-// to the front for immediate playback.  Falls back to a re-encode if stream
-// copy fails (some fragmented MP4 files can't be remuxed with -c copy).
+// 5044s), which makes the file appear hours long.  A stream-copy video + AAC
+// audio remux with -movflags +faststart normalises the timestamps and moves the
+// moov atom to the front for immediate playback.  Falls back to a full re-encode
+// if the stream-copy path fails.
 //
-// Stream-copy path uses -copyts to preserve relative A/V timing relationships
-// and -start_at_zero to shift the global timeline so the earliest timestamp is
-// zero.  The re-encode fallback uses aresample=async=1 to correct any gradual
-// audio drift that may have accumulated during a long recording (fractional
-// clock mismatch between the audio and video encoder clocks).
+// The primary path uses -copyts to preserve relative A/V timing relationships,
+// -start_at_zero to shift the global timeline so the earliest timestamp is zero,
+// and aresample=async=1:first_pts=0 to dynamically correct gradual audio drift
+// that accumulates when Chaturbate/Stripchat serve separate video/audio HLS
+// playlists with fractionally different segment durations.
 //
 // warn is an optional logger (nil-safe) used to report A/V realignment.
 func normalizeFMP4Timestamps(videoPath string, warn func(string)) (string, error) {
 	tmpPath := videoPath + ".normalized.mp4"
 	ok := false
 
-	// Attempt 1: fast stream-copy remux with -copyts -start_at_zero to
-	// shift the whole timeline to zero while preserving A/V relationships.
+	// Attempt 1: stream-copy video + re-encode audio with gradual-drift
+	// correction.  Using -c:v copy keeps the video lossless (fast, no quality
+	// loss) while -af aresample=async=1:first_pts=0 dynamically resamples the
+	// audio to match the video presentation clock.  This fixes the gradual A/V
+	// drift that occurs when Chaturbate/Stripchat serve separate video and audio
+	// HLS playlists whose segment durations differ fractionally — a constant
+	// -itsoffset in MuxAV only corrects the start-time offset, not the drift.
 	func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -798,7 +803,9 @@ func normalizeFMP4Timestamps(videoPath string, warn func(string)) (string, error
 			"-start_at_zero",
 			"-fflags", "+genpts",
 			"-i", videoPath,
-			"-c", "copy",
+			"-c:v", "copy",
+			"-c:a", "aac",
+			"-af", "aresample=async=1:first_pts=0",
 			"-movflags", "+faststart",
 			tmpPath,
 		).Run()

@@ -241,6 +241,16 @@ func (u *SeekStreamingUploader) searchVideoByName(filename string) (*seekStreami
 		}
 	}
 
+	// Fallback: the host may truncate, prefix, or otherwise transform the
+	// filename.  Try matching by stem (without extension) and prefix.
+	stem := strings.TrimSuffix(filename, filepath.Ext(filename))
+	for _, v := range listResp.Data {
+		vn := strings.TrimSuffix(v.Name, filepath.Ext(v.Name))
+		if vn == stem || strings.HasPrefix(vn, stem) || strings.HasPrefix(stem, vn) {
+			return &v, nil
+		}
+	}
+
 	return nil, nil
 }
 

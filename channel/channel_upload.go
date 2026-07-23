@@ -46,7 +46,7 @@ const (
 	// stalls (per-host HTTP timeout is minutes-long) could hold the whole
 	// stage for hours across the 8 attempts.  Once exceeded we stop retrying
 	// and accept whatever hosts already succeeded.
-	uploadStageMaxDuration = 90 * time.Minute
+	uploadStageMaxDuration = 30 * time.Minute
 )
 
 // uploadFile uploads the given file to all configured hosts.

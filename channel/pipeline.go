@@ -137,39 +137,41 @@ func (p *Pipeline) advanceTo(s Stage) {
 func (p *Pipeline) toDBState() *database.PipelineState {
 	linksJSON, _ := json.Marshal(p.Links)
 	return &database.PipelineState{
-		FileHash:     p.FileHash,
-		FilePath:     p.FilePath,
-		Filename:     p.Filename,
-		Username:     p.Username,
-		FileSize:     p.FileSize,
-		NodeID:       server.NodeID(),
-		CurrentStage: p.CurrentStage.String(),
-		Failed:       p.Failed,
-		LastError:    p.LastError,
-		Retries:      p.Retries,
-		ThumbURL:     p.ThumbURL,
-		PreviewURL:   p.PreviewURL,
-		EmbedURL:     p.EmbedURL,
-		LinksJSON:    string(linksJSON),
+		FileHash:        p.FileHash,
+		FilePath:        p.FilePath,
+		Filename:        p.Filename,
+		Username:        p.Username,
+		FileSize:        p.FileSize,
+		NodeID:          server.NodeID(),
+		CurrentStage:    p.CurrentStage.String(),
+		Failed:          p.Failed,
+		MetadataFailed:  p.MetadataFailed,
+		LastError:       p.LastError,
+		Retries:         p.Retries,
+		ThumbURL:        p.ThumbURL,
+		PreviewURL:      p.PreviewURL,
+		EmbedURL:        p.EmbedURL,
+		LinksJSON:       string(linksJSON),
 	}
 }
 
 // pipelineFromDBState converts a database.PipelineState back to a Pipeline.
 func pipelineFromDBState(s *database.PipelineState) *Pipeline {
 	p := &Pipeline{
-		FileHash:     s.FileHash,
-		FilePath:     s.FilePath,
-		Filename:     s.Filename,
-		Username:     s.Username,
-		FileSize:     s.FileSize,
-		CurrentStage: stageFromString(s.CurrentStage),
-		Failed:       s.Failed,
-		LastError:    s.LastError,
-		Retries:      s.Retries,
-		ThumbURL:     s.ThumbURL,
-		PreviewURL:   s.PreviewURL,
-		EmbedURL:     s.EmbedURL,
-		Links:        make(map[string]string),
+		FileHash:        s.FileHash,
+		FilePath:        s.FilePath,
+		Filename:        s.Filename,
+		Username:        s.Username,
+		FileSize:        s.FileSize,
+		CurrentStage:    stageFromString(s.CurrentStage),
+		Failed:          s.Failed,
+		MetadataFailed:  s.MetadataFailed,
+		LastError:       s.LastError,
+		Retries:         s.Retries,
+		ThumbURL:        s.ThumbURL,
+		PreviewURL:      s.PreviewURL,
+		EmbedURL:        s.EmbedURL,
+		Links:           make(map[string]string),
 	}
 	if s.LinksJSON != "" {
 		json.Unmarshal([]byte(s.LinksJSON), &p.Links)
@@ -608,6 +610,10 @@ func (p *Pipeline) generateLocalThumbnail(ch *Channel) (string, error) {
 
 	genCtx, genCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer genCancel()
+
+	// Try fast seek first (keyframe-accurate, -ss before -i).  If that fails
+	// (e.g. no usable keyframe near the seek point), retry with accurate seek
+	// (-ss after -i) which decodes from the start but is more reliable.
 	cmd := config.FFmpegCommandContext(genCtx,
 		"-y",
 		"-ss", fmt.Sprintf("%.2f", seek),
@@ -617,8 +623,22 @@ func (p *Pipeline) generateLocalThumbnail(ch *Channel) (string, error) {
 		"-q:v", "3",
 		thumbPath,
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("ffmpeg thumbnail: %w (output: %s)", err, string(out))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		cmd2 := config.FFmpegCommandContext(genCtx,
+			"-y",
+			"-i", p.FilePath,
+			"-ss", fmt.Sprintf("%.2f", seek),
+			"-frames:v", "1",
+			"-vf", "scale=480:-2",
+			"-q:v", "3",
+			thumbPath,
+		)
+		out2, err2 := cmd2.CombinedOutput()
+		if err2 != nil {
+			return "", fmt.Errorf("ffmpeg thumbnail (fast seek: %v, accurate: %v) fast output: %s accurate output: %s",
+				err, err2, string(out), string(out2))
+		}
 	}
 	if _, statErr := os.Stat(thumbPath); statErr != nil {
 		return "", fmt.Errorf("thumbnail not produced: %w", statErr)
@@ -943,9 +963,17 @@ func (pq *PipelineQueue) processPipeline(p *Pipeline) {
 		ch.Info("pipeline: stage thumbnail_upload for %s", filename)
 		ch.SetUploadProgress(filename, "uploading to hosts", 5, 0, 0, 0, 0, "", nil)
 
+		// Acquire the global upload semaphore to bound the number of
+		// concurrent file uploads across all channels.  Each file fans out
+		// to all configured hosts in parallel, so without this cap we can
+		// easily overwhelm the proxy/network with hundreds of concurrent
+		// HTTP streams when many channels record simultaneously.
+		UploadSem <- struct{}{}
+
 		var uploadErr error
 		func() {
 			defer func() {
+				<-UploadSem
 				if r := recover(); r != nil {
 					ch.Error("pipeline: upload panicked for %s: %v", filename, r)
 					uploadErr = fmt.Errorf("upload panic: %v", r)
@@ -1184,12 +1212,22 @@ func (pq *PipelineQueue) ResumePending() {
 		}
 		// Skip pipelines that have exhausted their retry budget.
 		if s.Retries >= maxPipelineRetries {
-			pq.ch.Warn("pipeline: skipping %s — %d retries exhausted (last error: %s)",
-				s.Filename, s.Retries, s.LastError)
-			if delErr := server.DeletePipelineState(s.FileHash); delErr != nil {
-				pq.ch.Warn("pipeline: could not delete exhausted state for %s: %v", s.Filename, delErr)
+			if s.MetadataFailed {
+				// Metadata-only failure: uploads already succeeded. Keep the
+				// state and re-queue so stageSaveMetadata is retried. Reset
+				// retries to one below the max so the next attempt also enters
+				// the keep-file branch instead of deleting the state.
+				pq.ch.Warn("pipeline: %s — %d retries exhausted (metadata), re-queuing for another attempt",
+					s.Filename, s.Retries)
+				s.Retries = maxPipelineRetries - 1
+			} else {
+				pq.ch.Warn("pipeline: skipping %s — %d retries exhausted (last error: %s)",
+					s.Filename, s.Retries, s.LastError)
+				if delErr := server.DeletePipelineState(s.FileHash); delErr != nil {
+					pq.ch.Warn("pipeline: could not delete exhausted state for %s: %v", s.Filename, delErr)
+				}
+				continue
 			}
-			continue
 		}
 		// Dedup: skip if a pipeline for this hash is already queued (e.g.
 		// ResumePending called twice, or the file was re-enqueued manually).

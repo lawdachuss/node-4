@@ -733,22 +733,23 @@ func (c *Client) DeleteJournalByHash(fileHash string) error {
 // Schema defined in migrate.sql (CREATE TABLE pipeline_states).
 
 type PipelineState struct {
-	FileHash     string `json:"file_hash"`
-	FilePath     string `json:"file_path"`
-	Filename     string `json:"filename"`
-	Username     string `json:"username"`
-	FileSize     int64  `json:"file_size"`
-	CurrentStage string `json:"current_stage"`
-	Failed       bool   `json:"failed"`
-	LastError    string `json:"last_error,omitempty"`
-	ThumbURL     string `json:"thumb_url,omitempty"`
-	PreviewURL   string `json:"preview_url,omitempty"`
-	EmbedURL     string `json:"embed_url,omitempty"`
-	LinksJSON    string `json:"links,omitempty"` // JSON-encoded map[string]string
-	Retries      int    `json:"retries,omitempty"`
-	NodeID       string `json:"node_id,omitempty"`
-	CreatedAt    string `json:"created_at,omitempty"`
-	UpdatedAt    string `json:"updated_at,omitempty"`
+	FileHash        string `json:"file_hash"`
+	FilePath        string `json:"file_path"`
+	Filename        string `json:"filename"`
+	Username        string `json:"username"`
+	FileSize        int64  `json:"file_size"`
+	CurrentStage    string `json:"current_stage"`
+	Failed          bool   `json:"failed"`
+	LastError       string `json:"last_error,omitempty"`
+	MetadataFailed  bool   `json:"metadata_failed"`
+	ThumbURL        string `json:"thumb_url,omitempty"`
+	PreviewURL      string `json:"preview_url,omitempty"`
+	EmbedURL        string `json:"embed_url,omitempty"`
+	LinksJSON       string `json:"links,omitempty"` // JSON-encoded map[string]string
+	Retries         int    `json:"retries,omitempty"`
+	NodeID          string `json:"node_id,omitempty"`
+	CreatedAt       string `json:"created_at,omitempty"`
+	UpdatedAt       string `json:"updated_at,omitempty"`
 }
 
 // SavePipelineState upserts a pipeline state by file_hash.

@@ -68,8 +68,9 @@ func (ch *Channel) Monitor(ctx context.Context) {
 			case errors.Is(err, internal.ErrStreamStalled):
 				return 15*time.Second + time.Duration(rand.Int63n(16))*time.Second
 			case errors.Is(err, internal.ErrChannelOffline) || errors.Is(err, internal.ErrPrivateStream) || errors.Is(err, internal.ErrPasswordRequired):
-				base := time.Duration(server.Config.Interval) * time.Minute
-				return base + time.Duration(rand.Int63n(31))*time.Second
+				// Poll more frequently when offline so we catch the model
+				// coming online quickly (30-45s instead of 60-90s).
+				return 30*time.Second + time.Duration(rand.Int63n(16))*time.Second
 			default:
 				backoff := time.Duration(min(1<<n, 32)) * 10 * time.Second
 				return backoff + time.Duration(rand.Int63n(11))*time.Second
